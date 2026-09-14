@@ -1,0 +1,25 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { ComparisonController } from '../controllers/ComparisonController';
+import { validateBody } from '../middleware/validateRequest';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
+
+const compareSchema = z.object({
+  documentAId: z.string().min(1, 'Document A ID is required'),
+  documentBId: z.string().min(1, 'Document B ID is required'),
+});
+
+export function createComparisonRoutes(
+  comparisonController: ComparisonController,
+  authMiddleware: (req: AuthenticatedRequest, res: any, next: any) => void
+): Router {
+  const router = Router();
+
+  router.use(authMiddleware);
+
+  router.post('/', validateBody(compareSchema), comparisonController.compare);
+  router.get('/', comparisonController.list);
+  router.get('/:id', comparisonController.getById);
+
+  return router;
+}
