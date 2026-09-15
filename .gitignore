@@ -8,7 +8,6 @@ coverage/
 *.sqlite-shm
 data/
 uploads/
-.env
 .env.local
 npm-debug.log*
 yarn-debug.log*
