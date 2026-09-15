@@ -9,10 +9,8 @@ import { DocumentChunk } from '../../src/core/domain/DocumentChunk';
 import { LegalDocument } from '../../src/core/domain/LegalDocument';
 import { ReindexDocumentUseCase } from '../../src/core/use-cases/DocumentUseCases';
 import { AskDocumentChatUseCase } from '../../src/core/use-cases/ChatUseCases';
-import { ChatMessage } from '../../src/core/domain/ChatMessage';
 import {
   AIServiceError,
-  AIServiceUnavailableError,
   RateLimitError,
   NotFoundError,
   ForbiddenError,
@@ -651,9 +649,15 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
         id: 'd1',
         userId: 'owner-id',
         title: 'Title',
-        filename: 'file.pdf',
-        fileType: 'pdf',
-        fileSize: 100,
+        originalFilename: 'file.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 100,
+        storagePath: '/data/file.pdf',
+        pageCount: 1,
+        characterCount: 50,
+        status: 'ready',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
       const docRepo = { findById: vi.fn().mockResolvedValue(doc) } as any;
       const vectorStore = { searchKeyword: vi.fn(), upsertChunks: vi.fn() } as any;
@@ -668,9 +672,15 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
         id: 'd1',
         userId: 'u1',
         title: 'Title',
-        filename: 'file.pdf',
-        fileType: 'pdf',
-        fileSize: 100,
+        originalFilename: 'file.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 100,
+        storagePath: '/data/file.pdf',
+        pageCount: 1,
+        characterCount: 50,
+        status: 'ready',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
       const docRepo = { findById: vi.fn().mockResolvedValue(doc) } as any;
       const vectorStore = { searchKeyword: vi.fn().mockResolvedValue([]), upsertChunks: vi.fn() } as any;
@@ -687,9 +697,15 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
         id: 'd1',
         userId: 'u1',
         title: 'Title',
-        filename: 'file.pdf',
-        fileType: 'pdf',
-        fileSize: 100,
+        originalFilename: 'file.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 100,
+        storagePath: '/data/file.pdf',
+        pageCount: 1,
+        characterCount: 50,
+        status: 'ready',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
       const chunk1 = new DocumentChunk({
         id: 'c1',
@@ -736,9 +752,15 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
             id: 'd1',
             userId: 'u1',
             title: 'Doc',
-            filename: 'doc.pdf',
-            fileType: 'pdf',
-            fileSize: 100,
+            originalFilename: 'doc.pdf',
+            mimeType: 'application/pdf',
+            fileSizeBytes: 100,
+            storagePath: '/data/doc.pdf',
+            pageCount: 1,
+            characterCount: 50,
+            status: 'ready',
+            createdAt: new Date(),
+            updatedAt: new Date(),
           })
         ),
       } as any;
