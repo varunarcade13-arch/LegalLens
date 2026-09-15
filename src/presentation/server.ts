@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import express from 'express';
 import dotenv from 'dotenv';
@@ -9,11 +10,16 @@ dotenv.config();
 const port = process.env.PORT || 4000;
 const dbPath = process.env.DATABASE_PATH || path.resolve(__dirname, '../../data/legallens.db');
 
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new AppDatabase(dbPath);
 const { app } = createApp({ database: db });
 
 // Serve static frontend in production
-const clientDistPath = path.resolve(__dirname, '../client');
+const clientDistPath = path.resolve(__dirname, '..');
 app.use(express.static(clientDistPath));
 
 app.get('*', (req, res, next) => {
