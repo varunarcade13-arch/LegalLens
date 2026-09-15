@@ -123,9 +123,12 @@ export const ActionableBriefingView: React.FC<ActionableBriefingViewProps> = ({
             <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>
               Actionable Lawyer Preparation Briefing
             </h2>
-            <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-              Contract: <strong>{briefing.documentTitle}</strong>
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                Contract: <strong>{briefing.documentTitle}</strong>
+              </span>
+              <span className="badge badge-sky">AI Provider: Gemini</span>
+            </div>
           </div>
         </div>
 

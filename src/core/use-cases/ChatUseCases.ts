@@ -56,8 +56,16 @@ export class AskDocumentChatUseCase {
 
     // RAG Pipeline
     const queryEmbedding = await this.embeddingService.generateEmbedding(dto.question);
-    const searchResults = await this.vectorStore.searchSimilar(dto.documentId, queryEmbedding, 4);
-    const contextChunks = searchResults.map((r) => r.chunk);
+    const searchResults = await this.vectorStore.searchSimilar(dto.documentId, queryEmbedding, 5);
+    const seenChunkIds = new Set<string>();
+    const contextChunks = searchResults
+      .map((r) => r.chunk)
+      .filter((chunk) => {
+        if (seenChunkIds.has(chunk.id)) return false;
+        seenChunkIds.add(chunk.id);
+        return true;
+      })
+      .slice(0, 4);
 
     // Answer grounded question
     const structuredAnswer = await this.llmProvider.answerGroundedQuestion(dto.question.trim(), contextChunks);

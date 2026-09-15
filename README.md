@@ -68,41 +68,43 @@ src/
 │   │   ├── Comparison.ts
 │   │   ├── ChatMessage.ts
 │   │   ├── LegalBriefing.ts
-│   │   └── Errors.ts
+│   │   └── Errors.ts         # Domain errors including AIServiceUnavailableError & AIServiceError
 │   ├── ports/                # Abstract Interface Specifications (Dependency Inversion)
-│   │   └── index.ts          # Repositories, LLM Providers, Parsers, Security, Vector Store
+│   │   └── index.ts          # Zod Schemas, IEmbeddingProvider, ILLMProvider, Repositories
 │   └── use-cases/            # Application Orchestration & Use Case Logic
 │       ├── AuthUseCases.ts
-│       ├── DocumentUseCases.ts
+│       ├── DocumentUseCases.ts # Upload, fetch, delete, and reindex embedding migration
 │       ├── AnalysisUseCases.ts
 │       ├── ComparisonUseCases.ts
-│       ├── ChatUseCases.ts
+│       ├── ChatUseCases.ts   # Grounded RAG with chunk deduplication & top-k reranking
 │       ├── BriefingUseCases.ts
 │       └── DemoUseCases.ts
 ├── infrastructure/           # Concrete Infrastructure Implementations
-│   ├── ai/                   # LLM & Embedding Integrations
-│   │   ├── MockLLMProvider.ts    # Deterministic heuristic engine (no API key needed)
-│   │   ├── GeminiLLMProvider.ts  # Google Gemini 1.5 Pro / Flash implementation
-│   │   ├── OpenAILLMProvider.ts  # OpenAI GPT-4o implementation
-│   │   ├── LLMProviderFactory.ts # Provider factory with auto-fallback
-│   │   ├── EmbeddingService.ts   # Cosine-ready lexical/semantic vectorization
-│   │   ├── PromptSecurityService.ts # Injection defense & delimiter isolation
-│   │   └── VectorStore.ts        # SQLite-backed in-database vector index
+│   ├── ai/                   # GenAI & Embedding Integrations
+│   │   ├── GeminiLLMProvider.ts     # Genuine Google Gemini 1.5/2.0 API provider with Zod validation
+│   │   ├── GeminiEmbeddingProvider.ts# Semantic vector embeddings via text-embedding-004
+│   │   ├── OpenAILLMProvider.ts     # OpenAI GPT-4o provider with schema validation
+│   │   ├── MockLLMProvider.ts       # Test harness provider (active ONLY when LLM_PROVIDER=mock)
+│   │   ├── MockEmbeddingProvider.ts  # Deterministic test embedding harness
+│   │   ├── LLMProviderFactory.ts    # Provider factory (defaults to Gemini; zero silent mock fallback)
+│   │   ├── EmbeddingService.ts      # Vectorization service delegating to active embedding provider
+│   │   ├── PromptSecurityService.ts # XML delimiter isolation & prompt injection defense
+│   │   └── VectorStore.ts           # SQLite-backed vector index with cosine similarity search
 │   ├── db/                   # Persistent Storage Layer
-│   │   ├── Database.ts           # SQLite WAL-mode connection with foreign keys
-│   │   └── repositories/         # Sqlite*Repository implementations for each domain entity
+│   │   ├── Database.ts              # SQLite WAL-mode connection with foreign keys
+│   │   └── repositories/            # Sqlite*Repository implementations for each domain entity
 │   ├── parsers/              # File Ingestion Engines (PdfParse, Mammoth, Txt)
 │   ├── security/             # Security Utilities
-│   │   ├── BcryptPasswordHasher.ts # Salted BCrypt password hashing
-│   │   ├── JwtTokenService.ts      # Stateless HS256 JWT tokens
-│   │   ├── RateLimiter.ts          # Sliding-window IP rate limiter
-│   │   └── FileValidator.ts        # Strict size, extension, and magic-byte checks
+│   │   ├── BcryptPasswordHasher.ts  # Salted BCrypt password hashing
+│   │   ├── JwtTokenService.ts       # Stateless HS256 JWT tokens
+│   │   ├── RateLimiter.ts           # Sliding-window IP & AI endpoint rate limiter
+│   │   └── FileValidator.ts         # Strict size, extension, and magic-byte checks
 │   └── demo/                 # Seeded Fictional Legal Templates (Employment, SaaS, Lease)
 ├── presentation/             # HTTP & API Delivery Layer
 │   ├── app.ts                # Express application bootstrap with Helmet & CORS
 │   ├── server.ts             # Process lifecycle & graceful shutdown
 │   ├── controllers/          # Request handlers delegating to use cases
-│   ├── middleware/           # Auth, Validation (Zod), RateLimiter, ErrorHandler
+│   ├── middleware/           # Auth, Validation (Zod), AIRateLimiter, ErrorHandler
 │   └── routes/               # Modular REST endpoints
 └── client/                   # Modern React Single-Page Application
     ├── App.tsx               # Root application coordinator
@@ -112,10 +114,10 @@ src/
     │   ├── LandingPage.tsx           # Educational hero & feature showcase
     │   ├── DashboardView.tsx         # User workspace & document management table
     │   ├── UploadZone.tsx            # Drag-and-drop secure upload zone
-    │   ├── AnalysisView.tsx          # Plain language breakdown & clause explorer
-    │   ├── DocumentComparison.tsx    # Version diffing & categorized changes
-    │   ├── ChatInterface.tsx         # Grounded RAG conversational interface
-    │   ├── ActionableBriefingView.tsx# Lawyer briefing & interactive checklist
+    │   ├── AnalysisView.tsx          # Plain language breakdown, clause explorer & AI badge
+    │   ├── DocumentComparison.tsx    # Version diffing & categorized changes with AI badge
+    │   ├── ChatInterface.tsx         # Grounded RAG conversational interface with citations & confidence
+    │   ├── ActionableBriefingView.tsx# Lawyer briefing & interactive checklist with AI badge
     │   ├── DocumentSearch.tsx        # In-document snippet & keyword search
     │   ├── UserProfileView.tsx       # Account settings & GDPR-compliant purge
     │   └── AuthModal.tsx             # Login / registration modal dialog
@@ -125,18 +127,20 @@ src/
 
 ---
 
-## 🔒 Security, Privacy & Compliance Posture
+## 🔒 Security, Privacy & AI Guardrails Posture
 
 LegalLens is built for handling confidential and privileged contracts:
 
+- **Genuine GenAI with Zero Silent Fallback**: In standard application runtime, LegalLens calls the Google Gemini API with structured JSON output and schema validation. If the external AI service is unreachable, exhausted, or down, LegalLens returns HTTP 503 (`AIServiceUnavailableError`) rather than silently masquerading deterministic mocks as real AI intelligence.
 - **Complete Tenant Isolation**: Every document, chunk, vector embedding, chat message, and briefing is strictly tagged with `userId`. All repository queries enforce tenancy filters to completely eliminate Insecure Direct Object References (IDOR).
-- **Prompt Injection Guardrails (`PromptSecurityService`)**: User questions and contract contents are sanitized against injection vectors (`IGNORE PREVIOUS INSTRUCTIONS`, `SYSTEM PROMPT:`, roleplay jailbreaks). Prompts are wrapped in isolated XML delimiter boundaries with strict system constraints.
+- **Prompt Injection Guardrails (`PromptSecurityService`)**: User questions and contract contents are sanitized against injection vectors (`IGNORE PREVIOUS INSTRUCTIONS`, `SYSTEM PROMPT:`, roleplay jailbreaks). Prompts are wrapped in isolated instruction boundary delimiters with strict system constraints.
+- **Source-Grounded Citations & Confidence Scoring**: Answers generated in the RAG assistant verify source citations against actual retrieved context chunks. The assistant computes a grounded confidence score and displays active AI Provider telemetry (`Gemini`).
 - **Strict File Upload Validation (`FileValidator`)**:
   - Maximum upload size constrained (default 15MB).
   - Allowed file types strictly restricted to `.pdf`, `.docx`, and `.txt`.
   - Extension and MIME type verification.
   - Filename sanitization protecting against directory traversal (`../../`).
-- **Sliding-Window Rate Limiting (`RateLimiter`)**: Prevents brute-force credential stuffing and API denial-of-service.
+- **Sliding-Window Rate Limiting (`RateLimiter`)**: Dedicated AI endpoint rate limiting prevents API abuse and quotas exhaustion.
 - **Stateless Authentication**: Passwords hashed using BCrypt (configurable salt rounds); session authorization via cryptographically signed JSON Web Tokens (JWT).
 - **GDPR-Compliant Data Purge**: Users can permanently delete individual documents or trigger full account deletion, performing cascading purges across all relational tables and vector embeddings.
 
@@ -153,6 +157,7 @@ File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 -------------------|---------|----------|---------|---------|-------------------
 All files          |     100 |      100 |     100 |     100 |                   
  client            |     100 |      100 |     100 |     100 |                   
+  App.tsx          |     100 |      100 |     100 |     100 |                   
  client/components |     100 |      100 |     100 |     100 |                   
  client/services   |     100 |      100 |     100 |     100 |                   
  core/domain       |     100 |      100 |     100 |     100 |                   
@@ -170,7 +175,7 @@ All files          |     100 |      100 |     100 |     100 |
 -------------------|---------|----------|---------|---------|-------------------
 ```
 
-Total Automated Tests: **302 passing unit, security, and integration tests** across 13 test suites.
+Total Automated Tests: **349 passing unit, security, and integration tests** across 14 test suites.
 
 ---
 
@@ -199,11 +204,13 @@ cp .env.example .env
 | `NODE_ENV` | Environment mode (`development` / `production` / `test`) | `development` |
 | `JWT_SECRET` | Secret key for signing JWT tokens | *(Required in prod)* |
 | `DATABASE_PATH` | Path to SQLite database | `./data/legallens.sqlite` |
-| `LLM_PROVIDER` | Active LLM backend (`mock`, `gemini`, `openai`) | `mock` |
-| `GEMINI_API_KEY` | Google Gemini API Key *(Optional if using mock)* | `""` |
-| `OPENAI_API_KEY` | OpenAI API Key *(Optional if using mock)* | `""` |
+| `LLM_PROVIDER` | Active LLM backend (`gemini`, `openai`, `mock`) | `gemini` |
+| `GEMINI_API_KEY` | Google Gemini API Key | *(Required for Real AI)* |
+| `GEMINI_MODEL` | Gemini LLM model name | `gemini-1.5-flash` |
+| `GEMINI_EMBEDDING_MODEL` | Gemini text embedding model | `text-embedding-004` |
+| `OPENAI_API_KEY` | OpenAI API Key *(if LLM_PROVIDER=openai)* | `""` |
 
-> 💡 **Instant Evaluation Mode**: By default, `LLM_PROVIDER=mock` uses the built-in deterministic heuristic analysis engine. You can immediately evaluate, upload documents, and run tests without configuring external API keys.
+> 💡 **Automated Test / CI Mode**: For automated CI pipelines and offline unit testing, set `LLM_PROVIDER=mock` to run deterministic in-memory tests without external API dependencies. In production and development runtime, `LLM_PROVIDER=gemini` uses real Google Gemini GenAI.
 
 ### 3. Build & Run Locally
 ```bash

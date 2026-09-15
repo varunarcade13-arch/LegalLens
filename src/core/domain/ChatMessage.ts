@@ -14,6 +14,8 @@ export interface StructuredAnswer {
   sourceCitations: Citation[];
   questionsForLawyer: string[];
   grounded: boolean;
+  groundingConfidence?: number;
+  aiProvider?: string;
 }
 
 export interface ChatMessageProps {

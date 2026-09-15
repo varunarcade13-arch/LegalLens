@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import {
   api,
   LegalDocumentDTO,
@@ -573,7 +573,7 @@ describe('Frontend Client Coverage Boost', () => {
       fireEvent.submit(form);
 
       // Verify loading state is shown
-      expect(screen.getByText(/retrieving grounded context & verifying citations/i)).toBeDefined();
+      expect(screen.getByText(/searching your document/i)).toBeDefined();
 
       // Resolve the chat response
       resolveChat({
@@ -598,6 +598,107 @@ describe('Frontend Client Coverage Boost', () => {
       await waitFor(() => {
         expect(screen.getByText('Yes, with 30 days notice.')).toBeDefined();
       });
+    });
+
+    it('displays ungrounded badge when assistant message is not grounded', async () => {
+      vi.spyOn(api, 'getChatHistory').mockResolvedValue({
+        messages: [
+          {
+            id: 'm-ungrounded',
+            userId: 'u1',
+            documentId: 'doc-chat-1',
+            role: 'assistant',
+            content: 'Could not answer.',
+            structuredAnswer: {
+              shortAnswer: 'Not enough info.',
+              whatTheDocumentSays: 'Not mentioned.',
+              whyItMatters: 'Need further details.',
+              sourceCitations: [],
+              questionsForLawyer: [],
+              grounded: false,
+            },
+            createdAt: '',
+          },
+        ],
+      });
+
+      render(<ChatInterface document={mockDoc} />);
+      await waitFor(() => {
+        expect(screen.getByText('Not Grounded in Document')).toBeDefined();
+      });
+    });
+
+    it('displays grounded confidence percentage badge when confidence is provided', async () => {
+      vi.spyOn(api, 'getChatHistory').mockResolvedValue({
+        messages: [
+          {
+            id: 'm-confidence',
+            userId: 'u1',
+            documentId: 'doc-chat-1',
+            role: 'assistant',
+            content: 'Answered.',
+            structuredAnswer: {
+              shortAnswer: 'Answered with confidence.',
+              whatTheDocumentSays: 'Mentioned.',
+              whyItMatters: 'Details.',
+              sourceCitations: [],
+              questionsForLawyer: [],
+              grounded: true,
+              groundingConfidence: 0.95,
+            },
+            createdAt: '',
+          },
+        ],
+      });
+
+      render(<ChatInterface document={mockDoc} />);
+      await waitFor(() => {
+        expect(screen.getByText(/95% Confidence/)).toBeDefined();
+      });
+    });
+
+    it('advances loading step timer while awaiting response', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(api, 'getChatHistory').mockResolvedValue({ messages: [] });
+      let resolveChat: any;
+      const chatPromise = new Promise<{ message: ChatMessageDTO }>((res) => {
+        resolveChat = res;
+      });
+      vi.spyOn(api, 'askChat').mockReturnValue(chatPromise);
+
+      render(<ChatInterface document={mockDoc} />);
+
+      const input = screen.getByPlaceholderText(/ask a question about this contract/i);
+      fireEvent.change(input, { target: { value: 'Question?' } });
+      const form = input.closest('form')!;
+      fireEvent.submit(form);
+
+      expect(screen.getByText('Searching your document...')).toBeDefined();
+
+      act(() => {
+        vi.advanceTimersByTime(1300);
+      });
+      expect(screen.getByText('Finding relevant sections...')).toBeDefined();
+
+      act(() => {
+        vi.advanceTimersByTime(1300);
+      });
+      expect(screen.getByText('Generating grounded response with Gemini...')).toBeDefined();
+
+      await act(async () => {
+        resolveChat({
+          message: {
+            id: 'm-res',
+            userId: 'u1',
+            documentId: 'doc-chat-1',
+            role: 'assistant',
+            content: 'Done',
+            createdAt: '',
+          },
+        });
+      });
+
+      vi.useRealTimers();
     });
   });
 

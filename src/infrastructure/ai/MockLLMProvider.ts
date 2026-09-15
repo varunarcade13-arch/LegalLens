@@ -7,6 +7,11 @@ import { LegalBriefingProps } from '../../core/domain/LegalBriefing';
 import { DocumentChunk } from '../../core/domain/DocumentChunk';
 import { ILLMProvider } from '../../core/ports';
 
+/**
+ * MockLLMProvider — TEST ONLY
+ * Deterministic rule-based implementation used exclusively for offline development,
+ * CI environments, and unit testing when LLM_PROVIDER=mock.
+ */
 export class MockLLMProvider implements ILLMProvider {
   public readonly name: string = 'MockLLMProvider';
 
@@ -200,6 +205,8 @@ export class MockLLMProvider implements ILLMProvider {
           'Should we request a written amendment or addendum clarifying this term?',
         ],
         grounded: false,
+        groundingConfidence: 0.0,
+        aiProvider: 'Mock (Test Mode)',
       };
     }
 
@@ -273,6 +280,8 @@ export class MockLLMProvider implements ILLMProvider {
       sourceCitations: citations,
       questionsForLawyer,
       grounded: true,
+      groundingConfidence: 0.95,
+      aiProvider: 'Mock (Test Mode)',
     };
   }
 

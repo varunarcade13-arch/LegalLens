@@ -250,8 +250,9 @@ export const DocumentComparison: React.FC<DocumentComparisonProps> = ({
               borderLeft: '4px solid var(--primary-600)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
               <span className="badge badge-emerald">Executive Summary of Differences</span>
+              <span className="badge badge-sky">AI Provider: Gemini</span>
               <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                 {comparison.documentATitle} vs {comparison.documentBTitle}
               </span>

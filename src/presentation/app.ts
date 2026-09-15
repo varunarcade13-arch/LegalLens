@@ -69,14 +69,16 @@ import { createComparisonRoutes } from './routes/comparisonRoutes';
 import { createBriefingRoutes } from './routes/briefingRoutes';
 import { createDemoRoutes } from './routes/demoRoutes';
 import { createHealthRoutes } from './routes/healthRoutes';
-import { ILLMProvider } from '../core/ports';
+import { ILLMProvider, IEmbeddingService } from '../core/ports';
 
 export interface AppOptions {
   database?: AppDatabase;
   llmProvider?: ILLMProvider;
+  embeddingService?: IEmbeddingService;
   jwtSecret?: string;
   rateLimiter?: InMemoryRateLimiter;
   maxRequestsPerMinute?: number;
+  aiRequestsPerMinute?: number;
 }
 
 export function createApp(options?: AppOptions): { app: Express; database: AppDatabase } {
@@ -93,7 +95,7 @@ export function createApp(options?: AppOptions): { app: Express; database: AppDa
 
   // Services
   const parser = new DocumentParserFactory();
-  const embeddingService = new EmbeddingService();
+  const embeddingService = options?.embeddingService || new EmbeddingService();
   const vectorStore = new VectorStore(db);
   const llmProvider = options?.llmProvider || LLMProviderFactory.create();
   const passwordHasher = new BcryptPasswordHasher();
@@ -183,6 +185,11 @@ export function createApp(options?: AppOptions): { app: Express; database: AppDa
     options?.maxRequestsPerMinute ?? 300,
     60 * 1000
   );
+  const aiRateLimitMiddleware = createRateLimitMiddleware(
+    rateLimiter,
+    (options?.aiRequestsPerMinute ?? Number(process.env.AI_RATE_LIMIT_PER_MINUTE)) || 20,
+    60 * 1000
+  );
 
   // Express App
   const app = express();
@@ -205,10 +212,10 @@ export function createApp(options?: AppOptions): { app: Express; database: AppDa
   // Routes
   app.use('/api/auth', createAuthRoutes(authController, authMiddleware));
   app.use('/api/documents', createDocumentRoutes(documentController, authMiddleware));
-  app.use('/api/documents', createAnalysisRoutes(analysisController, authMiddleware));
-  app.use('/api/documents', createChatRoutes(chatController, authMiddleware));
-  app.use('/api/documents', createBriefingRoutes(briefingController, authMiddleware));
-  app.use('/api/comparisons', createComparisonRoutes(comparisonController, authMiddleware));
+  app.use('/api/documents', createAnalysisRoutes(analysisController, authMiddleware, aiRateLimitMiddleware));
+  app.use('/api/documents', createChatRoutes(chatController, authMiddleware, aiRateLimitMiddleware));
+  app.use('/api/documents', createBriefingRoutes(briefingController, authMiddleware, aiRateLimitMiddleware));
+  app.use('/api/comparisons', createComparisonRoutes(comparisonController, authMiddleware, aiRateLimitMiddleware));
   app.use('/api/demo', createDemoRoutes(demoController, authMiddleware));
   app.use('/api', createHealthRoutes(healthController));
 

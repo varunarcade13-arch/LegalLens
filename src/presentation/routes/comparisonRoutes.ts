@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { z } from 'zod';
 import { ComparisonController } from '../controllers/ComparisonController';
 import { validateBody } from '../middleware/validateRequest';
@@ -11,13 +11,18 @@ const compareSchema = z.object({
 
 export function createComparisonRoutes(
   comparisonController: ComparisonController,
-  authMiddleware: (req: AuthenticatedRequest, res: any, next: any) => void
+  authMiddleware: (req: AuthenticatedRequest, res: any, next: any) => void,
+  rateLimitMiddleware?: RequestHandler
 ): Router {
   const router = Router();
 
   router.use(authMiddleware);
 
-  router.post('/', validateBody(compareSchema), comparisonController.compare);
+  if (rateLimitMiddleware) {
+    router.post('/', rateLimitMiddleware, validateBody(compareSchema), comparisonController.compare);
+  } else {
+    router.post('/', validateBody(compareSchema), comparisonController.compare);
+  }
   router.get('/', comparisonController.list);
   router.get('/:id', comparisonController.getById);
 

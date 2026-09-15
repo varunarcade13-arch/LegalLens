@@ -5,6 +5,7 @@ import { DocumentAnalysis, DocumentAnalysisProps } from '../domain/DocumentAnaly
 import { Comparison, ComparisonProps } from '../domain/Comparison';
 import { ChatMessage, StructuredAnswer } from '../domain/ChatMessage';
 import { LegalBriefing, LegalBriefingProps } from '../domain/LegalBriefing';
+import { z } from 'zod';
 
 export interface IUserRepository {
   create(user: User): Promise<void>;
@@ -64,11 +65,137 @@ export interface IDocumentParser {
   supports(mimeType: string, filename: string): boolean;
   parse(buffer: Buffer, filename: string): Promise<ParsedDocumentResult>;
 }
+export interface IEmbeddingProvider {
+  readonly name: string;
+  generateEmbedding(text: string): Promise<number[]>;
+  generateEmbeddings(texts: string[]): Promise<number[][]>;
+}
 
 export interface IEmbeddingService {
   generateEmbedding(text: string): Promise<number[]>;
   generateEmbeddings(texts: string[]): Promise<number[][]>;
 }
+
+export const DocumentAnalysisAiSchema = z.object({
+  documentType: z.string().min(1),
+  partiesInvolved: z.array(z.string()).default([]),
+  effectiveDate: z.string().nullable().default(null),
+  expirationDate: z.string().nullable().default(null),
+  jurisdiction: z.string().nullable().default(null),
+  highLevelSummary: z.string().min(1),
+  plainLanguageSummary: z.object({
+    whatThisDocumentIsAbout: z.string().default(''),
+    whatYouAreAgreeingTo: z.array(z.string()).default([]),
+    whatTheOtherPartyIsAgreeingTo: z.array(z.string()).default([]),
+    yourKeyResponsibilities: z.array(z.string()).default([]),
+    yourRights: z.array(z.string()).default([]),
+    importantDates: z.array(z.string()).default([]),
+    financialObligations: z.array(z.string()).default([]),
+    terminationConditions: z.array(z.string()).default([]),
+  }),
+  extractedFacts: z
+    .array(
+      z.object({
+        category: z.string(),
+        fact: z.string(),
+        verbatimExcerpt: z.string(),
+        pageNumber: z.number().default(1),
+      })
+    )
+    .default([]),
+  clauses: z
+    .array(
+      z.object({
+        category: z.string(),
+        title: z.string(),
+        originalText: z.string(),
+        plainExplanation: z.string(),
+        whyItMatters: z.string(),
+        concernLevel: z.enum(['informational', 'review_carefully', 'high_attention']),
+        pageNumber: z.number().default(1),
+        sectionHeading: z.string().default('General'),
+      })
+    )
+    .default([]),
+  findings: z
+    .array(
+      z.object({
+        category: z.enum(['informational', 'review_carefully', 'high_attention']),
+        finding: z.string(),
+        whyItMatters: z.string(),
+        sourceReference: z.string(),
+        pageNumber: z.number().default(1),
+        sectionHeading: z.string().default('General'),
+        questionsToConsider: z.array(z.string()).default([]),
+        suggestedProfessionalFollowUp: z
+          .string()
+          .default('Consider discussing with a legal professional.'),
+      })
+    )
+    .default([]),
+});
+
+export const ClauseDifferenceAiSchema = z.object({
+  category: z.string(),
+  documentA: z.string(),
+  documentB: z.string(),
+  difference: z.string(),
+  whyItMatters: z.string(),
+  impactLevel: z.enum(['low', 'moderate', 'significant']),
+});
+
+export const ComparisonAiSchema = z.object({
+  executiveSummary: z.string(),
+  addedClauses: z.array(ClauseDifferenceAiSchema).default([]),
+  removedClauses: z.array(ClauseDifferenceAiSchema).default([]),
+  modifiedClauses: z.array(ClauseDifferenceAiSchema).default([]),
+  changedObligations: z.array(ClauseDifferenceAiSchema).default([]),
+  changedFinancialTerms: z.array(ClauseDifferenceAiSchema).default([]),
+  changedDates: z.array(ClauseDifferenceAiSchema).default([]),
+  changedTermination: z.array(ClauseDifferenceAiSchema).default([]),
+  changedLiability: z.array(ClauseDifferenceAiSchema).default([]),
+  changedDisputeResolution: z.array(ClauseDifferenceAiSchema).default([]),
+});
+
+export const CitationAiSchema = z.object({
+  chunkId: z.string(),
+  pageNumber: z.number().default(1),
+  sectionHeading: z.string().default(''),
+  textSnippet: z.string(),
+});
+
+export const GroundedAnswerAiSchema = z.object({
+  shortAnswer: z.string(),
+  whatTheDocumentSays: z.string(),
+  whyItMatters: z.string(),
+  sourceCitations: z.array(CitationAiSchema).default([]),
+  questionsForLawyer: z.array(z.string()).default([]),
+  grounded: z.boolean().default(true),
+  groundingConfidence: z.number().optional(),
+  aiProvider: z.string().optional(),
+});
+
+export const ActionChecklistItemAiSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  category: z.string(),
+  completed: z.boolean().default(false),
+});
+
+export const LawyerChecklistAiSchema = z.object({
+  questionsToAsk: z.array(z.string()).default([]),
+  documentsToBring: z.array(z.string()).default([]),
+  importantDeadlines: z.array(z.string()).default([]),
+  keyConcerns: z.array(z.string()).default([]),
+  clarificationAreas: z.array(z.string()).default([]),
+});
+
+export const LawyerBriefingAiSchema = z.object({
+  conciseSummary: z.string(),
+  lawyerChecklist: LawyerChecklistAiSchema,
+  actionChecklist: z.array(ActionChecklistItemAiSchema).default([]),
+});
+
 
 export interface VectorSearchResult {
   chunk: DocumentChunk;
@@ -147,6 +274,8 @@ export interface IFileValidator {
 export interface IPromptSecurityService {
   sanitizeInput(input: string): string;
   validateUserPrompt(prompt: string): void;
+  sanitizeRetrievedContext(text: string): string;
   wrapUntrustedContext(contextText: string): string;
+  wrapLegalDocumentContext(contextText: string): string;
   getSystemGuardrails(): string;
 }

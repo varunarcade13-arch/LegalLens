@@ -284,38 +284,45 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
       expect(analysis.extractedFacts.length).toBeGreaterThan(0);
     });
 
-    it('covers GeminiLLMProvider fallback on comparison and chat errors', async () => {
-      const gemini = new GeminiLLMProvider('invalid-key-will-fallback');
+    it('covers GeminiLLMProvider error handling on comparison and chat errors', async () => {
+      const gemini = new GeminiLLMProvider('invalid-key-will-error');
       vi.spyOn(gemini as any, 'callGeminiApi').mockRejectedValue(new Error('Network error'));
 
-      const comp = await gemini.generateComparison(
-        { title: 'Doc A', text: 'Agreement A' },
-        { title: 'Doc B', text: 'Agreement B' }
-      );
-      expect(comp.executiveSummary).toBeDefined();
+      await expect(
+        gemini.generateComparison(
+          { title: 'Doc A', text: 'Agreement A' },
+          { title: 'Doc B', text: 'Agreement B' }
+        )
+      ).rejects.toThrow();
 
-      const answer = await gemini.answerGroundedQuestion('Can I terminate?', []);
-      expect(answer.shortAnswer).toBeDefined();
+      await expect(
+        gemini.answerGroundedQuestion('Can I terminate?', [
+          new DocumentChunk({
+            id: 'c1',
+            documentId: 'd1',
+            chunkIndex: 0,
+            pageNumber: 1,
+            sectionHeading: 'S1',
+            content: 'Text',
+            tokenCount: 1,
+          }),
+        ])
+      ).rejects.toThrow();
     });
 
-    it('covers OpenAILLMProvider fallback on comparison and chat errors', async () => {
-      const openai = new OpenAILLMProvider('invalid-key-will-fallback');
+    it('covers OpenAILLMProvider error handling on comparison and chat errors', async () => {
+      const openai = new OpenAILLMProvider('invalid-key-will-error');
       vi.spyOn(openai as any, 'callOpenAiApi').mockRejectedValue(new Error('OpenAI error'));
 
-      const anl = await openai.generateAnalysis('Doc Title', 'Doc text', []);
-      expect(anl.highLevelSummary).toBeDefined();
-
-      const comp = await openai.generateComparison(
-        { title: 'Doc A', text: 'Agreement A' },
-        { title: 'Doc B', text: 'Agreement B' }
-      );
-      expect(comp.executiveSummary).toBeDefined();
-
-      const answer = await openai.answerGroundedQuestion('Can I terminate?', []);
-      expect(answer.shortAnswer).toBeDefined();
-
-      const brf = await openai.generateBriefing('Doc Title', anl);
-      expect(brf.conciseSummary).toBeDefined();
+      await expect(openai.generateAnalysis('Doc Title', 'Doc text', [])).rejects.toThrow();
+      await expect(
+        openai.generateComparison(
+          { title: 'Doc A', text: 'Agreement A' },
+          { title: 'Doc B', text: 'Agreement B' }
+        )
+      ).rejects.toThrow();
+      await expect(openai.answerGroundedQuestion('Can I terminate?', [])).rejects.toThrow();
+      await expect(openai.generateBriefing('Doc Title', {})).rejects.toThrow();
     });
 
     it('covers OpenAILLMProvider successful OpenAI API response parsing', async () => {
@@ -345,6 +352,16 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
                     extractedFacts: [],
                     clauses: [],
                     findings: [],
+                    executiveSummary: 'Comparison summary',
+                    addedClauses: [],
+                    removedClauses: [],
+                    modifiedClauses: [],
+                    changedObligations: [],
+                    changedFinancialTerms: [],
+                    changedDates: [],
+                    changedTermination: [],
+                    changedLiability: [],
+                    changedDisputeResolution: [],
                     shortAnswer: 'Yes, allowed.',
                     whatTheDocumentSays: 'Clause 4 allows termination.',
                     whyItMatters: 'Provides flexibility.',
@@ -1099,8 +1116,9 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
         json: async () => ({ candidates: [{ content: { parts: [{}] } }] }),
       } as any);
 
-      const geminiRes = await (gemini as any).callGeminiApi('test');
-      expect(geminiRes).toBe('');
+      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
+        'Empty response from Gemini API.'
+      );
 
       const openai = new OpenAILLMProvider('test-key');
       vi.spyOn(global, 'fetch').mockResolvedValueOnce({

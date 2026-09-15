@@ -54,3 +54,16 @@ export class RateLimitError extends DomainError {
     super(message, 429, 'RATE_LIMIT_EXCEEDED');
   }
 }
+
+export class AIServiceError extends DomainError {
+  constructor(message: string = 'AI service encountered an error.', statusCode: number = 502, code: string = 'AI_SERVICE_ERROR') {
+    super(message, statusCode, code);
+  }
+}
+
+export class AIServiceUnavailableError extends DomainError {
+  constructor(message: string = 'AI service is temporarily unavailable. Please try again.') {
+    super(message, 503, 'AI_SERVICE_UNAVAILABLE');
+  }
+}
+

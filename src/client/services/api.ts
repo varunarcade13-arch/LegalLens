@@ -127,6 +127,8 @@ export interface StructuredAnswerDTO {
   sourceCitations: CitationDTO[];
   questionsForLawyer: string[];
   grounded: boolean;
+  groundingConfidence?: number;
+  aiProvider?: string;
 }
 
 export interface ChatMessageDTO {

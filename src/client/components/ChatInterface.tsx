@@ -24,10 +24,28 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ document, onBack }
   const [messages, setMessages] = useState<ChatMessageDTO[]>([]);
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedCitations, setExpandedCitations] = useState<Record<string, boolean>>({});
 
+  const loadingSteps = [
+    'Searching your document...',
+    'Finding relevant sections...',
+    'Generating grounded response with Gemini...',
+  ];
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingStep(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setLoadingStep((prev) => (prev + 1) % 3);
+    }, 1200);
+    return () => clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     loadChat();
@@ -274,10 +292,25 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ document, onBack }
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   {/* Short answer */}
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <span className="badge badge-emerald" style={{ marginBottom: '0.35rem' }}>
-                        Short Answer
-                      </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span className="badge badge-emerald">
+                          Short Answer
+                        </span>
+                        <span className="badge badge-sky">
+                          AI Provider: {msg.structuredAnswer.aiProvider || 'Gemini'}
+                        </span>
+                        {msg.structuredAnswer.grounded ? (
+                          <span className="badge badge-emerald">
+                            Grounded in {msg.structuredAnswer.sourceCitations.length} section(s)
+                            {msg.structuredAnswer.groundingConfidence !== undefined && ` • ${Math.round(msg.structuredAnswer.groundingConfidence * 100)}% Confidence`}
+                          </span>
+                        ) : (
+                          <span className="badge badge-amber">
+                            Not Grounded in Document
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={() => copyToClipboard(msg.structuredAnswer!.shortAnswer, msg.id)}
                         className="btn btn-secondary"
@@ -396,7 +429,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ document, onBack }
         {loading && (
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', color: 'var(--text-muted)' }}>
             <Loader2 size={18} className="spinner" aria-hidden="true" />
-            <span style={{ fontSize: '0.875rem' }}>Retrieving grounded context & verifying citations...</span>
+            <span style={{ fontSize: '0.875rem' }}>{loadingSteps[loadingStep]}</span>
           </div>
         )}
 

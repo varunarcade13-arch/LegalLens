@@ -67,8 +67,9 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           }}
         >
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem', flexWrap: 'wrap' }}>
               <span className="badge badge-emerald">{analysis.documentType}</span>
+              <span className="badge badge-sky">AI Provider: Gemini</span>
               <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                 {document.pageCount} page(s) • {document.characterCount.toLocaleString()} characters
               </span>

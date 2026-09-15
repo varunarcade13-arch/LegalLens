@@ -1,74 +1,34 @@
-import { IEmbeddingService } from '../../core/ports';
+import { IEmbeddingService, IEmbeddingProvider } from '../../core/ports';
+import { GeminiEmbeddingProvider } from './GeminiEmbeddingProvider';
+import { MockEmbeddingProvider } from './MockEmbeddingProvider';
 
 export class EmbeddingService implements IEmbeddingService {
-  private dimensions: number;
+  private provider: IEmbeddingProvider;
 
-  constructor(dimensions: number = 64) {
-    this.dimensions = dimensions;
+  constructor(providerOrDimensions?: IEmbeddingProvider | number) {
+    if (typeof providerOrDimensions === 'number') {
+      this.provider = new MockEmbeddingProvider(providerOrDimensions);
+    } else if (providerOrDimensions) {
+      this.provider = providerOrDimensions;
+    } else {
+      const mode = (process.env.LLM_PROVIDER || 'gemini').toLowerCase();
+      if (mode === 'mock') {
+        this.provider = new MockEmbeddingProvider();
+      } else {
+        this.provider = new GeminiEmbeddingProvider();
+      }
+    }
+  }
+
+  public get providerName(): string {
+    return this.provider.name;
   }
 
   public async generateEmbedding(text: string): Promise<number[]> {
-    return this.computeVector(text);
+    return this.provider.generateEmbedding(text);
   }
 
   public async generateEmbeddings(texts: string[]): Promise<number[][]> {
-    return texts.map((t) => this.computeVector(t));
-  }
-
-  private computeVector(text: string): number[] {
-    const vector = new Array(this.dimensions).fill(0);
-    if (!text || text.trim().length === 0) {
-      return vector;
-    }
-
-    const tokens = text
-      .toLowerCase()
-      .replace(/[^\w\s]/g, ' ')
-      .split(/\s+/)
-      .filter((t) => t.length > 2);
-
-    if (tokens.length === 0) {
-      return vector;
-    }
-
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-      const hash = this.hashString(token);
-      const index = Math.abs(hash) % this.dimensions;
-      const weight = 1.0 + Math.min(token.length / 10, 1.0);
-      vector[index] += weight;
-
-      // Also hash character bigrams for subword robustness
-      if (i < tokens.length - 1) {
-        const bigram = `${token}_${tokens[i + 1]}`;
-        const biHash = this.hashString(bigram);
-        const biIndex = Math.abs(biHash) % this.dimensions;
-        vector[biIndex] += 1.5;
-      }
-    }
-
-    // L2 Normalize
-    let norm = 0;
-    for (let i = 0; i < this.dimensions; i++) {
-      norm += vector[i] * vector[i];
-    }
-    norm = Math.sqrt(norm);
-
-    if (norm > 0) {
-      for (let i = 0; i < this.dimensions; i++) {
-        vector[i] = vector[i] / norm;
-      }
-    }
-
-    return vector;
-  }
-
-  private hashString(str: string): number {
-    let hash = 5381;
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash << 5) + hash + str.charCodeAt(i);
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return hash;
+    return this.provider.generateEmbeddings(texts);
   }
 }

@@ -3,38 +3,67 @@ import { ComparisonProps } from '../../core/domain/Comparison';
 import { StructuredAnswer } from '../../core/domain/ChatMessage';
 import { LegalBriefingProps } from '../../core/domain/LegalBriefing';
 import { DocumentChunk } from '../../core/domain/DocumentChunk';
-import { ILLMProvider } from '../../core/ports';
-import { MockLLMProvider } from './MockLLMProvider';
+import {
+  ILLMProvider,
+  DocumentAnalysisAiSchema,
+  ComparisonAiSchema,
+  GroundedAnswerAiSchema,
+  LawyerBriefingAiSchema,
+} from '../../core/ports';
+import { AIServiceUnavailableError, RateLimitError } from '../../core/domain/Errors';
 import { PromptSecurityService } from './PromptSecurityService';
 
 export class OpenAILLMProvider implements ILLMProvider {
   public readonly name: string = 'OpenAILLMProvider';
   private apiKey: string;
   private model: string;
-  private fallback: MockLLMProvider;
   private promptSecurity: PromptSecurityService;
 
   constructor(apiKey: string = '', model: string = 'gpt-4o-mini') {
     this.apiKey = apiKey || process.env.OPENAI_API_KEY || '';
     this.model = model;
-    this.fallback = new MockLLMProvider();
     this.promptSecurity = new PromptSecurityService();
   }
 
   public async generateAnalysis(
     documentTitle: string,
     documentText: string,
-    chunks: DocumentChunk[]
+    _chunks: DocumentChunk[]
   ): Promise<Omit<DocumentAnalysisProps, 'id' | 'documentId' | 'createdAt' | 'updatedAt'>> {
     if (!this.apiKey) {
-      return this.fallback.generateAnalysis(documentTitle, documentText, chunks);
+      throw new AIServiceUnavailableError('OpenAI API key is not configured.');
     }
+    const prompt = `Analyze "${documentTitle}". Return JSON matching schema with documentType, partiesInvolved, highLevelSummary, plainLanguageSummary, extractedFacts, clauses, findings. Content:\n${documentText.substring(0, 10000)}`;
+    const response = await this.callOpenAiApi(prompt);
     try {
-      const prompt = `Analyze "${documentTitle}". Return JSON matching schema with documentType, partiesInvolved, highLevelSummary, plainLanguageSummary, extractedFacts, clauses, findings. Content:\n${documentText.substring(0, 10000)}`;
-      const response = await this.callOpenAiApi(prompt);
-      return JSON.parse(response);
+      const parsed = JSON.parse(response);
+      const validated = DocumentAnalysisAiSchema.parse(parsed);
+      return {
+        documentType: validated.documentType,
+        partiesInvolved: validated.partiesInvolved,
+        effectiveDate: validated.effectiveDate,
+        expirationDate: validated.expirationDate,
+        jurisdiction: validated.jurisdiction,
+        highLevelSummary: validated.highLevelSummary,
+        plainLanguageSummary: {
+          whatThisDocumentIsAbout: validated.plainLanguageSummary.whatThisDocumentIsAbout,
+          whatYouAreAgreeingTo: validated.plainLanguageSummary.whatYouAreAgreeingTo,
+          whatTheOtherPartyIsAgreeingTo: validated.plainLanguageSummary.whatTheOtherPartyIsAgreeingTo,
+          yourKeyResponsibilities: validated.plainLanguageSummary.yourKeyResponsibilities,
+          yourRights: validated.plainLanguageSummary.yourRights,
+          importantDates: validated.plainLanguageSummary.importantDates,
+          financialObligations: validated.plainLanguageSummary.financialObligations,
+          terminationConditions: validated.plainLanguageSummary.terminationConditions,
+        },
+        extractedFacts: validated.extractedFacts.map((f) => ({
+          ...f,
+          pageNumber: f.pageNumber,
+        })),
+        clauses: validated.clauses as any,
+        findings: validated.findings as any,
+      };
     } catch {
-      return this.fallback.generateAnalysis(documentTitle, documentText, chunks);
+      throw new AIServiceUnavailableError('Failed to generate valid legal analysis from AI service.');
     }
   }
 
@@ -48,14 +77,27 @@ export class OpenAILLMProvider implements ILLMProvider {
     >
   > {
     if (!this.apiKey) {
-      return this.fallback.generateComparison(docA, docB);
+      throw new AIServiceUnavailableError('OpenAI API key is not configured.');
     }
+    const prompt = `Compare "${docA.title}" vs "${docB.title}". Return JSON comparison schema with executiveSummary, addedClauses, removedClauses, modifiedClauses, changedObligations, changedFinancialTerms, changedDates, changedTermination, changedLiability, changedDisputeResolution. Content A:\n${docA.text.substring(0, 5000)}\nContent B:\n${docB.text.substring(0, 5000)}`;
+    const response = await this.callOpenAiApi(prompt);
     try {
-      const prompt = `Compare "${docA.title}" vs "${docB.title}". Return JSON comparison schema.`;
-      const response = await this.callOpenAiApi(prompt);
-      return JSON.parse(response);
+      const parsed = JSON.parse(response);
+      const validated = ComparisonAiSchema.parse(parsed);
+      return {
+        executiveSummary: validated.executiveSummary,
+        addedClauses: validated.addedClauses,
+        removedClauses: validated.removedClauses,
+        modifiedClauses: validated.modifiedClauses,
+        changedObligations: validated.changedObligations,
+        changedFinancialTerms: validated.changedFinancialTerms,
+        changedDates: validated.changedDates,
+        changedTermination: validated.changedTermination,
+        changedLiability: validated.changedLiability,
+        changedDisputeResolution: validated.changedDisputeResolution,
+      };
     } catch {
-      return this.fallback.generateComparison(docA, docB);
+      throw new AIServiceUnavailableError('Failed to generate valid comparison from AI service.');
     }
   }
 
@@ -64,16 +106,21 @@ export class OpenAILLMProvider implements ILLMProvider {
     contextChunks: DocumentChunk[]
   ): Promise<StructuredAnswer> {
     if (!this.apiKey) {
-      return this.fallback.answerGroundedQuestion(question, contextChunks);
+      throw new AIServiceUnavailableError('OpenAI API key is not configured.');
     }
+    this.promptSecurity.validateUserPrompt(question);
+    const contextText = contextChunks.map((c) => `[Chunk: ${c.id}] ${c.content}`).join('\n---\n');
+    const prompt = `Question: "${question}"\nContext:\n${contextText}\nReturn JSON with shortAnswer, whatTheDocumentSays, whyItMatters, sourceCitations, questionsForLawyer, grounded.`;
+    const response = await this.callOpenAiApi(prompt);
     try {
-      this.promptSecurity.validateUserPrompt(question);
-      const contextText = contextChunks.map((c) => c.content).join('\n---\n');
-      const prompt = `Question: "${question}"\nContext:\n${contextText}\nReturn JSON with shortAnswer, whatTheDocumentSays, whyItMatters, sourceCitations, questionsForLawyer, grounded.`;
-      const response = await this.callOpenAiApi(prompt);
-      return JSON.parse(response);
+      const parsed = JSON.parse(response);
+      const validated = GroundedAnswerAiSchema.parse(parsed);
+      return {
+        ...validated,
+        aiProvider: 'OpenAI',
+      };
     } catch {
-      return this.fallback.answerGroundedQuestion(question, contextChunks);
+      throw new AIServiceUnavailableError('Failed to generate valid answer from AI service.');
     }
   }
 
@@ -81,7 +128,33 @@ export class OpenAILLMProvider implements ILLMProvider {
     documentTitle: string,
     analysis: any
   ): Promise<Omit<LegalBriefingProps, 'id' | 'userId' | 'documentId' | 'documentTitle' | 'createdAt' | 'updatedAt'>> {
-    return this.fallback.generateBriefing(documentTitle, analysis);
+    if (!this.apiKey) {
+      throw new AIServiceUnavailableError('OpenAI API key is not configured.');
+    }
+    const prompt = `Generate lawyer briefing for "${documentTitle}" based on summary: ${analysis.highLevelSummary}. Return JSON matching schema.`;
+    const response = await this.callOpenAiApi(prompt);
+    try {
+      const parsed = JSON.parse(response);
+      const validated = LawyerBriefingAiSchema.parse(parsed);
+      return {
+        conciseSummary: validated.conciseSummary,
+        lawyerChecklist: {
+          questionsToAsk: validated.lawyerChecklist.questionsToAsk,
+          documentsToBring: validated.lawyerChecklist.documentsToBring,
+          importantDeadlines: validated.lawyerChecklist.importantDeadlines,
+          keyConcerns: validated.lawyerChecklist.keyConcerns,
+          clarificationAreas: validated.lawyerChecklist.clarificationAreas,
+        },
+        actionChecklist: validated.actionChecklist.map((a) => ({
+          id: a.id,
+          label: a.label,
+          category: a.category,
+          completed: Boolean(a.completed),
+        })),
+      };
+    } catch {
+      throw new AIServiceUnavailableError('Failed to generate valid briefing from AI service.');
+    }
   }
 
   private async callOpenAiApi(prompt: string): Promise<string> {
@@ -102,7 +175,10 @@ export class OpenAILLMProvider implements ILLMProvider {
     });
 
     if (!res.ok) {
-      throw new Error(`OpenAI API error: ${res.status} ${res.statusText}`);
+      if (res.status === 429) {
+        throw new RateLimitError('OpenAI rate limit exceeded.');
+      }
+      throw new AIServiceUnavailableError(`OpenAI API error: ${res.status}`);
     }
 
     const data = (await res.json()) as any;

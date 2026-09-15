@@ -280,32 +280,50 @@ laws of the State of Delaware.
   });
 
   describe('GeminiLLMProvider', () => {
-    it('uses fallback when API key is missing', async () => {
+    it('throws AIServiceUnavailableError when API key is missing', async () => {
       const gemini = new GeminiLLMProvider('');
       const chunks = [new DocumentChunk({ id: 'c1', documentId: 'd1', chunkIndex: 0, pageNumber: 1, sectionHeading: 'S1', content: 'Text', tokenCount: 1 })];
 
-      const analysis = await gemini.generateAnalysis('Title', 'Text', chunks);
-      expect(analysis.documentType).toBeDefined();
-
-      const comparison = await gemini.generateComparison({ title: 'A', text: 'Text A' }, { title: 'B', text: 'Text B' });
-      expect(comparison.executiveSummary).toBeDefined();
-
-      const answer = await gemini.answerGroundedQuestion('What is this?', chunks);
-      expect(answer.shortAnswer).toBeDefined();
-
-      const briefing = await gemini.generateBriefing('Title', analysis);
-      expect(briefing.conciseSummary).toBeDefined();
+      await expect(gemini.generateAnalysis('Title', 'Text', chunks)).rejects.toThrow('Gemini API key is not configured.');
+      await expect(gemini.generateComparison({ title: 'A', text: 'Text A' }, { title: 'B', text: 'Text B' })).rejects.toThrow('Gemini API key is not configured.');
+      await expect(gemini.answerGroundedQuestion('What is this?', chunks)).rejects.toThrow('Gemini API key is not configured.');
+      await expect(gemini.generateBriefing('Title', {})).rejects.toThrow('Gemini API key is not configured.');
     });
 
-    it('calls Gemini API and parses response with error fallback', async () => {
+    it('calls Gemini API and parses response with error handling', async () => {
       const gemini = new GeminiLLMProvider('test-api-key');
       const chunks = [new DocumentChunk({ id: 'c1', documentId: 'd1', chunkIndex: 0, pageNumber: 1, sectionHeading: 'S1', content: 'Text', tokenCount: 1 })];
 
       // Mock fetch success
+      const validAnalysis = {
+        documentType: 'SaaS Agreement',
+        highLevelSummary: 'Cloud terms',
+        partiesInvolved: ['Corp A', 'Corp B'],
+        effectiveDate: null,
+        expirationDate: null,
+        jurisdiction: null,
+        plainLanguageSummary: {
+          whatThisDocumentIsAbout: 'SaaS terms',
+          whatYouAreAgreeingTo: ['Pay fees'],
+          whatTheOtherPartyIsAgreeingTo: ['Provide software'],
+          yourKeyResponsibilities: ['Keep password safe'],
+          yourRights: ['Access system'],
+          importantDates: [],
+          financialObligations: ['$100/mo'],
+          terminationConditions: ['30 days notice'],
+        },
+        extractedFacts: [
+          { fact: 'Agreement term is 12 months', category: 'General', verbatimExcerpt: 'Term is 12 months', pageNumber: 1 },
+          { fact: 'Monthly subscription fee is $100', category: 'Financial', verbatimExcerpt: '$100 per month' },
+        ],
+        clauses: [],
+        findings: [],
+      };
+
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          candidates: [{ content: { parts: [{ text: '```json\n{"documentType": "SaaS Agreement", "highLevelSummary": "Cloud terms", "partiesInvolved": [], "extractedFacts": [], "clauses": [], "findings": []}\n```' }] } }],
+          candidates: [{ content: { parts: [{ text: `\`\`\`json\n${JSON.stringify(validAnalysis)}\n\`\`\`` }] } }],
         }),
       });
       global.fetch = mockFetch;
@@ -327,45 +345,84 @@ laws of the State of Delaware.
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          candidates: [{ content: { parts: [{ text: '{"shortAnswer": "Yes", "whatTheDocumentSays": "Says yes", "whyItMatters": "Important", "sourceCitations": [], "questionsForLawyer": [], "grounded": true}' }] } }],
+          candidates: [{ content: { parts: [{ text: '{"shortAnswer": "Yes", "whatTheDocumentSays": "Says yes", "whyItMatters": "Important", "sourceCitations": [{"chunkId": "c1", "pageNumber": 1, "sectionHeading": "S1", "textSnippet": "Text"}], "questionsForLawyer": [], "grounded": true}' }] } }],
         }),
       });
       const answer = await gemini.answerGroundedQuestion('Is it allowed?', chunks);
       expect(answer.shortAnswer).toBe('Yes');
+      expect(answer.aiProvider).toBe('Gemini');
+      expect(answer.groundingConfidence).toBe(1);
 
-      // Test error fallback
+      // Briefing mock
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: JSON.stringify({
+            conciseSummary: 'Briefing summary aid',
+            lawyerChecklist: {
+              questionsToAsk: ['Are terms mutual?'],
+              documentsToBring: ['Contract draft'],
+              importantDeadlines: [],
+              keyConcerns: ['Liability'],
+              clarificationAreas: [],
+            },
+            actionChecklist: [{ id: 'a1', label: 'Check termination', category: 'Termination', completed: false }],
+          }) }] } }],
+        }),
+      });
+      const briefing = await gemini.generateBriefing('Cloud Contract', analysis);
+      expect(briefing.conciseSummary).toBe('Briefing summary aid');
+
+      // Test error handling
       mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Internal Error' });
-      const fallbackAnalysis = await gemini.generateAnalysis('Error Doc', 'Text', chunks);
-      expect(fallbackAnalysis.documentType).toBeDefined();
+      await expect(gemini.generateAnalysis('Error Doc', 'Text', chunks)).rejects.toThrow();
     });
   });
 
   describe('OpenAILLMProvider', () => {
-    it('uses fallback when API key is missing', async () => {
+    it('throws AIServiceUnavailableError when API key is missing', async () => {
       const openai = new OpenAILLMProvider('');
       const chunks = [new DocumentChunk({ id: 'c1', documentId: 'd1', chunkIndex: 0, pageNumber: 1, sectionHeading: 'S1', content: 'Text', tokenCount: 1 })];
 
-      const analysis = await openai.generateAnalysis('Title', 'Text', chunks);
-      expect(analysis.documentType).toBeDefined();
-
-      const comparison = await openai.generateComparison({ title: 'A', text: 'A' }, { title: 'B', text: 'B' });
-      expect(comparison.executiveSummary).toBeDefined();
-
-      const answer = await openai.answerGroundedQuestion('Question?', chunks);
-      expect(answer.shortAnswer).toBeDefined();
-
-      const briefing = await openai.generateBriefing('Title', analysis);
-      expect(briefing.conciseSummary).toBeDefined();
+      await expect(openai.generateAnalysis('Title', 'Text', chunks)).rejects.toThrow('OpenAI API key is not configured.');
+      await expect(openai.generateComparison({ title: 'A', text: 'A' }, { title: 'B', text: 'B' })).rejects.toThrow('OpenAI API key is not configured.');
+      await expect(openai.answerGroundedQuestion('Question?', chunks)).rejects.toThrow('OpenAI API key is not configured.');
+      await expect(openai.generateBriefing('Title', {})).rejects.toThrow('OpenAI API key is not configured.');
     });
 
-    it('calls OpenAI API and parses response with error fallback', async () => {
+    it('calls OpenAI API and parses response with error handling', async () => {
       const openai = new OpenAILLMProvider('test-openai-key');
       const chunks = [new DocumentChunk({ id: 'c1', documentId: 'd1', chunkIndex: 0, pageNumber: 1, sectionHeading: 'S1', content: 'Text', tokenCount: 1 })];
+
+      const validAnalysis = {
+        documentType: 'Vendor Agreement',
+        highLevelSummary: 'Vendor terms',
+        partiesInvolved: ['Vendor', 'Client'],
+        effectiveDate: null,
+        expirationDate: null,
+        jurisdiction: null,
+        plainLanguageSummary: {
+          whatThisDocumentIsAbout: 'Vendor terms',
+          whatYouAreAgreeingTo: ['Pay invoices'],
+          whatTheOtherPartyIsAgreeingTo: ['Supply goods'],
+          yourKeyResponsibilities: ['Order in advance'],
+          yourRights: ['Inspect goods'],
+          importantDates: [],
+          financialObligations: ['Net 30'],
+          terminationConditions: ['Default cure 15 days'],
+        },
+        extractedFacts: [
+          { fact: 'Vendor agrees to deliver goods', category: 'General', verbatimExcerpt: 'Vendor will deliver', pageNumber: 2 },
+          { fact: 'Payment is due Net 30', category: 'Financial', verbatimExcerpt: 'Net 30 days' },
+        ],
+        clauses: [],
+        findings: [],
+      };
 
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          choices: [{ message: { content: '{"documentType": "Vendor Agreement", "highLevelSummary": "Vendor terms", "partiesInvolved": [], "extractedFacts": [], "clauses": [], "findings": []}' } }],
+          choices: [{ message: { content: JSON.stringify(validAnalysis) } }],
         }),
       });
       global.fetch = mockFetch;
@@ -391,10 +448,29 @@ laws of the State of Delaware.
       const answer = await openai.answerGroundedQuestion('Allowed?', chunks);
       expect(answer.shortAnswer).toBe('Allowed');
 
-      // Test error fallback
+      // Test briefing
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({
+            conciseSummary: 'OpenAI Briefing summary',
+            lawyerChecklist: {
+              questionsToAsk: ['Are indemnities mutual?'],
+              documentsToBring: ['Agreement'],
+              importantDeadlines: [],
+              keyConcerns: ['Payment'],
+              clarificationAreas: [],
+            },
+            actionChecklist: [{ id: 'a1', label: 'Verify dates', category: 'Dates', completed: false }],
+          }) } }],
+        }),
+      });
+      const briefing = await openai.generateBriefing('Vendor Title', analysis);
+      expect(briefing.conciseSummary).toBe('OpenAI Briefing summary');
+
+      // Test error rejection
       mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Server Error' });
-      const fallbackAns = await openai.answerGroundedQuestion('Error?', chunks);
-      expect(fallbackAns.shortAnswer).toBeDefined();
+      await expect(openai.answerGroundedQuestion('Error?', chunks)).rejects.toThrow();
     });
   });
 
@@ -403,7 +479,7 @@ laws of the State of Delaware.
       expect(LLMProviderFactory.create('gemini').name).toBe('GeminiLLMProvider');
       expect(LLMProviderFactory.create('openai').name).toBe('OpenAILLMProvider');
       expect(LLMProviderFactory.create('mock').name).toBe('MockLLMProvider');
-      expect(LLMProviderFactory.create('unknown').name).toBe('MockLLMProvider');
+      expect(LLMProviderFactory.create('unknown').name).toBe('GeminiLLMProvider');
     });
   });
 

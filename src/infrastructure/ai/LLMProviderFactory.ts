@@ -5,16 +5,16 @@ import { OpenAILLMProvider } from './OpenAILLMProvider';
 
 export class LLMProviderFactory {
   public static create(providerType?: string): ILLMProvider {
-    const type = (providerType || process.env.LLM_PROVIDER || 'mock').toLowerCase();
+    const type = (providerType || process.env.LLM_PROVIDER || 'gemini').toLowerCase();
 
     switch (type) {
-      case 'gemini':
-        return new GeminiLLMProvider();
+      case 'mock':
+        return new MockLLMProvider();
       case 'openai':
         return new OpenAILLMProvider();
-      case 'mock':
+      case 'gemini':
       default:
-        return new MockLLMProvider();
+        return new GeminiLLMProvider();
     }
   }
 }

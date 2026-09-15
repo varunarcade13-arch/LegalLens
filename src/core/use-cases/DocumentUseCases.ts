@@ -266,3 +266,39 @@ export class SearchDocumentUseCase {
     });
   }
 }
+
+export class ReindexDocumentUseCase {
+  constructor(
+    private documentRepository: IDocumentRepository,
+    private vectorStore: IVectorStore,
+    private embeddingService: IEmbeddingService
+  ) {}
+
+  public async execute(documentId: string, userId: string): Promise<number> {
+    const doc = await this.documentRepository.findById(documentId);
+    if (!doc) {
+      throw new NotFoundError('Document not found');
+    }
+    if (!doc.isOwnedBy(userId)) {
+      throw new ForbiddenError('Access to this document is denied');
+    }
+
+    const chunks = await this.vectorStore.searchKeyword(documentId, '');
+    if (chunks.length === 0) {
+      return 0;
+    }
+
+    const texts = chunks.map((c) => c.content);
+    const newEmbeddings = await this.embeddingService.generateEmbeddings(texts);
+
+    chunks.forEach((chunk, idx) => {
+      if (newEmbeddings[idx]) {
+        chunk.setEmbedding(newEmbeddings[idx]);
+      }
+    });
+
+    await this.vectorStore.upsertChunks(chunks);
+    return chunks.length;
+  }
+}
+
