@@ -19,6 +19,10 @@ import { createAnalysisRoutes } from '../../src/presentation/routes/analysisRout
 import { createBriefingRoutes } from '../../src/presentation/routes/briefingRoutes';
 import { createChatRoutes } from '../../src/presentation/routes/chatRoutes';
 import { createComparisonRoutes } from '../../src/presentation/routes/comparisonRoutes';
+import { VectorStore } from '../../src/infrastructure/ai/VectorStore';
+import { AppDatabase } from '../../src/infrastructure/db/Database';
+import { GenerateLegalBriefingUseCase, GetLegalBriefingUseCase } from '../../src/core/use-cases/BriefingUseCases';
+import { DocumentAnalysis } from '../../src/core/domain/DocumentAnalysis';
 
 describe('Gemini Real AI & GenAI Coverage Suite', () => {
   const originalFetch = global.fetch;
@@ -40,7 +44,7 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       delete process.env.GEMINI_EMBEDDING_MODEL;
       const provider = new GeminiEmbeddingProvider();
       expect(provider.name).toBe('GeminiEmbeddingProvider');
-      expect((provider as any).model).toBe('text-embedding-004');
+      expect((provider as any).model).toBe('gemini-embedding-001');
     });
 
     it('throws AIServiceUnavailableError when API key is missing', async () => {
@@ -53,10 +57,10 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       );
     });
 
-    it('returns 768 zero values for empty or whitespace text', async () => {
+    it('returns 3072 zero values for empty or whitespace text', async () => {
       const provider = new GeminiEmbeddingProvider('test-key');
       const res = await provider.generateEmbedding('   ');
-      expect(res).toHaveLength(768);
+      expect(res).toHaveLength(3072);
       expect(res.every((v) => v === 0)).toBe(true);
     });
 
@@ -66,9 +70,9 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       expect(res).toEqual([]);
     });
 
-    it('successfully generates embeddings via Gemini API', async () => {
+    it('successfully generates embeddings via Gemini API with x-goog-api-key header and taskType', async () => {
       const provider = new GeminiEmbeddingProvider('test-key');
-      const fakeEmbedding = [0.1, 0.2, 0.3];
+      const fakeEmbedding = new Array(3072).fill(0.01);
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -76,8 +80,33 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
         }),
       });
 
-      const res = await provider.generateEmbedding('clause content');
+      const res = await provider.generateEmbedding('clause content', 'RETRIEVAL_DOCUMENT');
       expect(res).toEqual(fakeEmbedding);
+
+      const [url, options] = (global.fetch as any).mock.calls[0];
+      expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent');
+      expect(options.headers['x-goog-api-key']).toBe('test-key');
+      const body = JSON.parse(options.body);
+      expect(body.taskType).toBe('RETRIEVAL_DOCUMENT');
+      expect(body.model).toBe('models/gemini-embedding-001');
+    });
+
+    it('successfully sends RETRIEVAL_QUERY taskType for query embeddings', async () => {
+      const provider = new GeminiEmbeddingProvider('test-key');
+      const fakeEmbedding = new Array(3072).fill(0.02);
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          embedding: { values: fakeEmbedding },
+        }),
+      });
+
+      const res = await provider.generateEmbedding('what is the termination clause?', 'RETRIEVAL_QUERY');
+      expect(res).toEqual(fakeEmbedding);
+
+      const [, options] = (global.fetch as any).mock.calls[0];
+      const body = JSON.parse(options.body);
+      expect(body.taskType).toBe('RETRIEVAL_QUERY');
     });
 
     it('handles batching in generateEmbeddings (> 16 items)', async () => {
@@ -91,30 +120,69 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       });
 
       const texts = Array.from({ length: 20 }, (_, i) => `chunk ${i}`);
-      const res = await provider.generateEmbeddings(texts);
+      const res = await provider.generateEmbeddings(texts, 'RETRIEVAL_DOCUMENT');
       expect(res).toHaveLength(20);
       expect(global.fetch).toHaveBeenCalledTimes(20);
     });
 
-    it('handles 429 rate limit error in generateEmbedding', async () => {
+    it('handles 429 rate limit error with rich diagnostics in generateEmbedding', async () => {
       const provider = new GeminiEmbeddingProvider('test-key');
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 429,
-      });
-
-      await expect(provider.generateEmbedding('test')).rejects.toThrow(RateLimitError);
-    });
-
-    it('handles non-ok HTTP status in generateEmbedding', async () => {
-      const provider = new GeminiEmbeddingProvider('test-key');
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
+        json: async () => ({ error: { message: 'Quota exceeded' } }),
       });
 
       await expect(provider.generateEmbedding('test')).rejects.toThrow(
-        'Gemini embedding API error: 500'
+        'Gemini embedding API rate limit exceeded (model: gemini-embedding-001, status: 429): Quota exceeded'
+      );
+    });
+
+    it('handles non-ok HTTP status with rich diagnostics in generateEmbedding', async () => {
+      const provider = new GeminiEmbeddingProvider('test-key');
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: { message: 'Model not found' } }),
+      });
+
+      await expect(provider.generateEmbedding('test')).rejects.toThrow(
+        'Gemini embedding API error (model: gemini-embedding-001, status: 404): Model not found'
+      );
+
+      // Fallback when json parsing fails
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: async () => { throw new Error('Not JSON'); },
+      });
+
+      await expect(provider.generateEmbedding('test')).rejects.toThrow(
+        'Gemini embedding API error (model: gemini-embedding-001, status: 500): Internal Server Error'
+      );
+
+      // Fallback when json has no error.message
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ customError: 'Invalid field' }),
+      });
+
+      await expect(provider.generateEmbedding('test')).rejects.toThrow(
+        'Gemini embedding API error (model: gemini-embedding-001, status: 400): {"customError":"Invalid field"}'
+      );
+
+      // Fallback when json parsing fails and statusText is empty
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: '',
+        json: async () => { throw new Error('Not JSON'); },
+      });
+
+      await expect(provider.generateEmbedding('test')).rejects.toThrow(
+        'Gemini embedding API error (model: gemini-embedding-001, status: 500): Unknown error'
       );
     });
 
@@ -158,19 +226,29 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
     });
 
     it('defaults to GeminiEmbeddingProvider when LLM_PROVIDER is gemini or unset', () => {
-      process.env.LLM_PROVIDER = 'gemini';
-      const service = new EmbeddingService();
-      expect(service.providerName).toBe('GeminiEmbeddingProvider');
+      const orig = process.env.LLM_PROVIDER;
+      try {
+        process.env.LLM_PROVIDER = 'gemini';
+        const service = new EmbeddingService();
+        expect(service.providerName).toBe('GeminiEmbeddingProvider');
 
-      delete process.env.LLM_PROVIDER;
-      const service2 = new EmbeddingService();
-      expect(service2.providerName).toBe('GeminiEmbeddingProvider');
+        delete process.env.LLM_PROVIDER;
+        const service2 = new EmbeddingService();
+        expect(service2.providerName).toBe('GeminiEmbeddingProvider');
+      } finally {
+        if (orig) process.env.LLM_PROVIDER = orig;
+      }
     });
 
     it('creates MockEmbeddingProvider when LLM_PROVIDER is mock and no arguments given', () => {
-      process.env.LLM_PROVIDER = 'mock';
-      const service = new EmbeddingService();
-      expect(service.providerName).toBe('MockEmbeddingProvider');
+      const orig = process.env.LLM_PROVIDER;
+      try {
+        process.env.LLM_PROVIDER = 'mock';
+        const service = new EmbeddingService();
+        expect(service.providerName).toBe('MockEmbeddingProvider');
+      } finally {
+        if (orig) process.env.LLM_PROVIDER = orig;
+      }
     });
 
     it('delegates generateEmbedding and generateEmbeddings to provider', async () => {
@@ -234,63 +312,105 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       expect(brief.conciseSummary).toBe('Standard brief');
     });
 
-    it('handles HTTP 400 and throws AIServiceError', async () => {
+    it('handles HTTP 400 and throws AIServiceError with diagnostics', async () => {
       const gemini = new GeminiLLMProvider('test-key');
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 400,
+        json: async () => ({ error: { message: 'Invalid payload' } }),
       });
 
-      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(AIServiceError);
+      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
+        'Gemini generation API error (model: gemini-3.6-flash, status: 400): Invalid payload'
+      );
     });
 
-    it('handles HTTP 401 and 403 auth errors', async () => {
+    it('handles HTTP 401 and 403 auth errors with diagnostics', async () => {
       const gemini = new GeminiLLMProvider('test-key');
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: false,
         status: 401,
+        json: async () => ({ error: { message: 'API key expired' } }),
       });
       await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
-        'AI service authentication failed.'
+        'Gemini generation API authentication failed (model: gemini-3.6-flash, status: 401): API key expired'
       );
 
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: false,
         status: 403,
+        json: async () => ({ error: { message: 'Forbidden' } }),
       });
       await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
-        'AI service authentication failed.'
+        'Gemini generation API authentication failed (model: gemini-3.6-flash, status: 403): Forbidden'
       );
     });
 
-    it('handles HTTP 404 model not found', async () => {
+    it('handles HTTP 404 model not found with diagnostics', async () => {
       const gemini = new GeminiLLMProvider('test-key');
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
+        json: async () => ({ error: { message: 'Model not found' } }),
       });
       await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
-        'Configured Gemini model was not found.'
+        'Gemini generation model was not found (model: gemini-3.6-flash, status: 404): Model not found'
       );
     });
 
-    it('handles HTTP 429 rate limit error', async () => {
+    it('handles HTTP 429 rate limit error with diagnostics', async () => {
       const gemini = new GeminiLLMProvider('test-key');
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 429,
-      });
-      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(RateLimitError);
-    });
-
-    it('handles HTTP 500+ server errors', async () => {
-      const gemini = new GeminiLLMProvider('test-key');
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 503,
+        json: async () => ({ error: { message: 'Exhausted quota' } }),
       });
       await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
-        'Gemini service is temporarily unavailable. Please try again.'
+        'Gemini generation API rate limit exceeded (model: gemini-3.6-flash, status: 429): Exhausted quota'
+      );
+    });
+
+    it('handles HTTP 500+ server errors with diagnostics', async () => {
+      const gemini = new GeminiLLMProvider('test-key');
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: { message: 'High demand' } }),
+      });
+      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
+        'Gemini generation service is temporarily unavailable (model: gemini-3.6-flash, status: 503): High demand'
+      );
+
+      // Fallback to statusText when json throws
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        json: async () => { throw new Error('Not JSON'); },
+      });
+      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
+        'Gemini generation service is temporarily unavailable (model: gemini-3.6-flash, status: 502): Bad Gateway'
+      );
+
+      // Fallback when json has no error.message
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ rawFailure: 'Something broke' }),
+      });
+      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
+        'Gemini generation service is temporarily unavailable (model: gemini-3.6-flash, status: 500): {"rawFailure":"Something broke"}'
+      );
+
+      // Fallback when json throws and statusText is empty
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: '',
+        json: async () => { throw new Error('Not JSON'); },
+      });
+      await expect((gemini as any).callGeminiApi('test')).rejects.toThrow(
+        'Gemini generation service is temporarily unavailable (model: gemini-3.6-flash, status: 502): Unknown error'
       );
     });
 
@@ -611,9 +731,14 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
 
   describe('LLMProviderFactory default environment fallback', () => {
     it('creates GeminiLLMProvider when providerType is undefined and process.env.LLM_PROVIDER is unset', () => {
-      delete process.env.LLM_PROVIDER;
-      const provider = LLMProviderFactory.create();
-      expect(provider.name).toBe('GeminiLLMProvider');
+      const orig = process.env.LLM_PROVIDER;
+      try {
+        delete process.env.LLM_PROVIDER;
+        const provider = LLMProviderFactory.create();
+        expect(provider.name).toBe('GeminiLLMProvider');
+      } finally {
+        if (orig) process.env.LLM_PROVIDER = orig;
+      }
     });
   });
 
@@ -846,6 +971,237 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       } as any;
       const compRouter = createComparisonRoutes(mockCompCtrl, mockAuth);
       expect(compRouter).toBeDefined();
+    });
+  });
+
+  describe('VectorStore Dimension Mismatch and Incompatible Embedding Invalidation', () => {
+    it('invalidates chunk with incompatible vector dimensions during searchSimilar', async () => {
+      const appDb = new AppDatabase(':memory:');
+      const store = new VectorStore(appDb.connection);
+      const now = new Date().toISOString();
+
+      appDb.connection.prepare(
+        'INSERT INTO users (id, email, password_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run('u1', 'u1@example.com', 'hash', 'User 1', now, now);
+      appDb.connection.prepare(
+        'INSERT INTO documents (id, user_id, title, original_filename, mime_type, file_size_bytes, storage_path, page_count, character_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run('doc-dim-test', 'u1', 'Title', 'f.pdf', 'application/pdf', 100, '/data/f.pdf', 1, 100, 'ready', now, now);
+
+      const chunk64 = new DocumentChunk({
+        id: 'chunk-64',
+        documentId: 'doc-dim-test',
+        chunkIndex: 0,
+        pageNumber: 1,
+        sectionHeading: 'Heading',
+        content: 'Old clause content with 64-dim embedding',
+        tokenCount: 10,
+        embedding: new Array(64).fill(0.1),
+      });
+
+      const chunk3072 = new DocumentChunk({
+        id: 'chunk-3072',
+        documentId: 'doc-dim-test',
+        chunkIndex: 1,
+        pageNumber: 1,
+        sectionHeading: 'Heading',
+        content: 'New clause content with 3072-dim embedding',
+        tokenCount: 10,
+        embedding: new Array(3072).fill(0.01),
+      });
+
+      await store.upsertChunks([chunk64, chunk3072]);
+
+      const query3072 = new Array(3072).fill(0.01);
+      const results = await store.searchSimilar('doc-dim-test', query3072, 10);
+
+      expect(results).toHaveLength(2);
+      // chunk-3072 should match with high similarity
+      const res3072 = results.find((r) => r.chunk.id === 'chunk-3072');
+      expect(res3072?.score).toBeGreaterThan(0.99);
+
+      // chunk-64 should have score 0 because dimension mismatched and got invalidated
+      const res64 = results.find((r) => r.chunk.id === 'chunk-64');
+      expect(res64?.score).toBe(0);
+
+      // Verify that chunk-64 was set to NULL in DB
+      const row = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-64') as any;
+      expect(row.embedding).toBeNull();
+
+      appDb.close();
+    });
+
+    it('invalidates incompatible and malformed embeddings via invalidateIncompatibleEmbeddings', async () => {
+      const appDb = new AppDatabase(':memory:');
+      const store = new VectorStore(appDb.connection);
+      const now = new Date().toISOString();
+
+      appDb.connection.prepare(
+        'INSERT INTO users (id, email, password_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run('u2', 'u2@example.com', 'hash', 'User 2', now, now);
+      appDb.connection.prepare(
+        'INSERT INTO documents (id, user_id, title, original_filename, mime_type, file_size_bytes, storage_path, page_count, character_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run('doc-inv-test', 'u2', 'Title', 'f.pdf', 'application/pdf', 100, '/data/f.pdf', 1, 100, 'ready', now, now);
+
+      const chunkOld = new DocumentChunk({
+        id: 'chunk-old',
+        documentId: 'doc-inv-test',
+        chunkIndex: 0,
+        pageNumber: 1,
+        sectionHeading: 'Heading',
+        content: 'Old 64 dim',
+        tokenCount: 5,
+        embedding: new Array(64).fill(0.05),
+      });
+
+      const chunkValid = new DocumentChunk({
+        id: 'chunk-valid',
+        documentId: 'doc-inv-test',
+        chunkIndex: 1,
+        pageNumber: 1,
+        sectionHeading: 'Heading',
+        content: 'Valid 3072 dim',
+        tokenCount: 5,
+        embedding: new Array(3072).fill(0.05),
+      });
+
+      await store.upsertChunks([chunkOld, chunkValid]);
+
+      // Manually insert a malformed non-JSON embedding to verify catch block
+      appDb.connection.prepare(
+        'INSERT INTO document_chunks (id, document_id, chunk_index, page_number, section_heading, content, token_count, embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run('chunk-corrupt', 'doc-inv-test', 2, 1, 'H', 'corrupt', 1, '{not valid json}');
+
+      // Invalidate everything not 3072
+      const count = await store.invalidateIncompatibleEmbeddings(3072);
+      expect(count).toBe(2); // chunk-old and chunk-corrupt
+
+      const validRow = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-valid') as any;
+      expect(JSON.parse(validRow.embedding)).toHaveLength(3072);
+
+      const oldRow = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-old') as any;
+      expect(oldRow.embedding).toBeNull();
+
+      const corruptRow = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-corrupt') as any;
+      expect(corruptRow.embedding).toBeNull();
+
+      appDb.close();
+    });
+  });
+
+  describe('End-to-End Briefing Flow with Real Gemini Provider', () => {
+    it('generates, caches, and returns legal briefing from document analysis', async () => {
+      const doc = new LegalDocument({
+        id: 'doc-brief-flow',
+        userId: 'user-flow',
+        title: 'Commercial Lease Agreement',
+        originalFilename: 'lease.pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: 1000,
+        storagePath: '/data/lease.pdf',
+        pageCount: 2,
+        characterCount: 500,
+        status: 'ready',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const analysis = new DocumentAnalysis({
+        id: 'anl-brief-flow',
+        documentId: 'doc-brief-flow',
+        documentType: 'Commercial Lease',
+        partiesInvolved: ['Landlord LLC', 'Tenant Inc'],
+        effectiveDate: '2026-01-01',
+        expirationDate: '2027-01-01',
+        jurisdiction: 'New York',
+        highLevelSummary: 'Lease for commercial premises',
+        plainLanguageSummary: {
+          whatThisDocumentIsAbout: 'Lease agreement',
+          whatYouAreAgreeingTo: ['Pay rent'],
+          whatTheOtherPartyIsAgreeingTo: ['Provide space'],
+          yourKeyResponsibilities: ['Maintenance'],
+          yourRights: ['Quiet enjoyment'],
+          importantDates: ['First of each month'],
+          financialObligations: ['$5,000/mo'],
+          terminationConditions: ['30 days notice'],
+        },
+        extractedFacts: [],
+        clauses: [],
+        findings: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      let savedBriefing: any = null;
+      const docRepo = {
+        findById: vi.fn().mockResolvedValue(doc),
+      } as any;
+      const briefingRepo = {
+        findByDocumentId: vi.fn().mockImplementation(() => Promise.resolve(savedBriefing)),
+        save: vi.fn().mockImplementation((b) => {
+          savedBriefing = b;
+          return Promise.resolve();
+        }),
+      } as any;
+      const analysisRepo = {
+        findByDocumentId: vi.fn().mockResolvedValue(analysis),
+      } as any;
+      const analyzeDocUseCase = {
+        execute: vi.fn().mockResolvedValue(analysis),
+      } as any;
+
+      const gemini = new GeminiLLMProvider('test-api-key');
+
+      // Mock Gemini generateContent API response for briefing
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      conciseSummary: 'Commercial Lease briefing preparation aid.',
+                      lawyerChecklist: {
+                        questionsToAsk: ['Is there an early termination fee?'],
+                        documentsToBring: ['Lease copy', 'Rent receipts'],
+                        importantDeadlines: ['Notice by Nov 1'],
+                        keyConcerns: ['Uncapped maintenance liability'],
+                        clarificationAreas: ['Sublease restrictions'],
+                      },
+                      actionChecklist: [
+                        { id: 'act-1', label: 'Clarify sublease clause', category: 'questionsToAsk', completed: false },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const generateUseCase = new GenerateLegalBriefingUseCase(
+        docRepo,
+        briefingRepo,
+        analysisRepo,
+        analyzeDocUseCase,
+        gemini
+      );
+
+      const getUseCase = new GetLegalBriefingUseCase(docRepo, briefingRepo, generateUseCase);
+
+      // First call generates via Gemini
+      const briefing1 = await getUseCase.execute('doc-brief-flow', 'user-flow');
+      expect(briefing1.conciseSummary).toBe('Commercial Lease briefing preparation aid.');
+      expect(briefing1.lawyerChecklist.questionsToAsk).toContain('Is there an early termination fee?');
+      expect(briefing1.actionChecklist).toHaveLength(1);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Second call retrieves cached briefing without calling Gemini
+      const briefing2 = await getUseCase.execute('doc-brief-flow', 'user-flow');
+      expect(briefing2.id).toBe(briefing1.id);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -33,7 +33,7 @@ export class GeminiLLMProvider implements ILLMProvider {
     maxRetries: number = 1
   ) {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
-    this.model = model || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    this.model = model || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
     this.timeoutMs = timeoutMs ?? (process.env.AI_REQUEST_TIMEOUT_MS ? Number(process.env.AI_REQUEST_TIMEOUT_MS) : 30000);
     this.maxRetries = maxRetries;
     this.promptSecurity = new PromptSecurityService();
@@ -322,7 +322,7 @@ Ensure conciseSummary explicitly clarifies that this brief is an AI-generated pr
   }
 
   private async callGeminiApi(prompt: string): Promise<string> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -330,7 +330,10 @@ Ensure conciseSummary explicitly clarifies that this brief is an AI-generated pr
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { responseMimeType: 'application/json' },
@@ -344,19 +347,27 @@ Ensure conciseSummary explicitly clarifies that this brief is an AI-generated pr
     clearTimeout(timeoutId);
 
     if (!res.ok) {
+      let errorDetail = '';
+      try {
+        const errJson = (await res.json()) as any;
+        errorDetail = errJson?.error?.message || JSON.stringify(errJson);
+      } catch {
+        errorDetail = res.statusText || 'Unknown error';
+      }
+
       if (res.status === 429) {
-        throw new RateLimitError('AI service rate limit exceeded. Please try again later.');
+        throw new RateLimitError(`Gemini generation API rate limit exceeded (model: ${this.model}, status: 429): ${errorDetail}`);
       }
       if (res.status === 401 || res.status === 403) {
-        throw new AIServiceUnavailableError('AI service authentication failed.');
+        throw new AIServiceUnavailableError(`Gemini generation API authentication failed (model: ${this.model}, status: ${res.status}): ${errorDetail}`);
       }
       if (res.status === 404) {
-        throw new AIServiceUnavailableError('Configured Gemini model was not found.');
+        throw new AIServiceUnavailableError(`Gemini generation model was not found (model: ${this.model}, status: 404): ${errorDetail}`);
       }
       if (res.status >= 500) {
-        throw new AIServiceUnavailableError('Gemini service is temporarily unavailable. Please try again.');
+        throw new AIServiceUnavailableError(`Gemini generation service is temporarily unavailable (model: ${this.model}, status: ${res.status}): ${errorDetail}`);
       }
-      throw new AIServiceError(`Gemini API returned HTTP ${res.status}`);
+      throw new AIServiceError(`Gemini generation API error (model: ${this.model}, status: ${res.status}): ${errorDetail}`);
     }
 
     const data = (await res.json()) as any;

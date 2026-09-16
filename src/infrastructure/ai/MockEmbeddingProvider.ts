@@ -1,4 +1,4 @@
-import { IEmbeddingProvider } from '../../core/ports';
+import { IEmbeddingProvider, EmbeddingTaskType } from '../../core/ports';
 
 export class MockEmbeddingProvider implements IEmbeddingProvider {
   public readonly name: string = 'MockEmbeddingProvider';
@@ -8,11 +8,11 @@ export class MockEmbeddingProvider implements IEmbeddingProvider {
     this.dimensions = dimensions;
   }
 
-  public async generateEmbedding(text: string): Promise<number[]> {
+  public async generateEmbedding(text: string, _taskType?: EmbeddingTaskType): Promise<number[]> {
     return this.computeVector(text);
   }
 
-  public async generateEmbeddings(texts: string[]): Promise<number[][]> {
+  public async generateEmbeddings(texts: string[], _taskType?: EmbeddingTaskType): Promise<number[][]> {
     return texts.map((t) => this.computeVector(t));
   }
 

@@ -1,4 +1,4 @@
-import { IEmbeddingService, IEmbeddingProvider } from '../../core/ports';
+import { IEmbeddingService, IEmbeddingProvider, EmbeddingTaskType } from '../../core/ports';
 import { GeminiEmbeddingProvider } from './GeminiEmbeddingProvider';
 import { MockEmbeddingProvider } from './MockEmbeddingProvider';
 
@@ -24,11 +24,11 @@ export class EmbeddingService implements IEmbeddingService {
     return this.provider.name;
   }
 
-  public async generateEmbedding(text: string): Promise<number[]> {
-    return this.provider.generateEmbedding(text);
+  public async generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<number[]> {
+    return this.provider.generateEmbedding(text, taskType);
   }
 
-  public async generateEmbeddings(texts: string[]): Promise<number[][]> {
-    return this.provider.generateEmbeddings(texts);
+  public async generateEmbeddings(texts: string[], taskType?: EmbeddingTaskType): Promise<number[][]> {
+    return this.provider.generateEmbeddings(texts, taskType);
   }
 }

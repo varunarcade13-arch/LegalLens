@@ -65,15 +65,17 @@ export interface IDocumentParser {
   supports(mimeType: string, filename: string): boolean;
   parse(buffer: Buffer, filename: string): Promise<ParsedDocumentResult>;
 }
+export type EmbeddingTaskType = 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY';
+
 export interface IEmbeddingProvider {
   readonly name: string;
-  generateEmbedding(text: string): Promise<number[]>;
-  generateEmbeddings(texts: string[]): Promise<number[][]>;
+  generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<number[]>;
+  generateEmbeddings(texts: string[], taskType?: EmbeddingTaskType): Promise<number[][]>;
 }
 
 export interface IEmbeddingService {
-  generateEmbedding(text: string): Promise<number[]>;
-  generateEmbeddings(texts: string[]): Promise<number[][]>;
+  generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<number[]>;
+  generateEmbeddings(texts: string[], taskType?: EmbeddingTaskType): Promise<number[][]>;
 }
 
 export const DocumentAnalysisAiSchema = z.object({
@@ -207,6 +209,7 @@ export interface IVectorStore {
   searchSimilar(documentId: string, queryEmbedding: number[], topK?: number): Promise<VectorSearchResult[]>;
   searchKeyword(documentId: string, query: string): Promise<DocumentChunk[]>;
   deleteByDocumentId(documentId: string): Promise<void>;
+  invalidateIncompatibleEmbeddings(expectedDimension: number): Promise<number>;
 }
 
 export interface ILLMProvider {

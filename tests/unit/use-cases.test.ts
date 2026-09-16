@@ -153,11 +153,12 @@ class MockVecStore implements IVectorStore {
     return docChunks.filter((c) => c.content.toLowerCase().includes(query.toLowerCase()));
   }
   async deleteByDocumentId(documentId: string) { this.chunks.delete(documentId); }
+  async invalidateIncompatibleEmbeddings(_expectedDimension: number) { return 0; }
 }
 
 class MockEmbedSvc implements IEmbeddingService {
-  async generateEmbedding(_text: string) { return [0.1, 0.2]; }
-  async generateEmbeddings(texts: string[]) { return texts.map(() => [0.1, 0.2]); }
+  async generateEmbedding(_text: string, _taskType?: any) { return [0.1, 0.2]; }
+  async generateEmbeddings(texts: string[], _taskType?: any) { return texts.map(() => [0.1, 0.2]); }
 }
 
 class MockDocParser implements IDocumentParser {

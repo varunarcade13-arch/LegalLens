@@ -69,7 +69,7 @@ export class UploadDocumentUseCase {
     const chunks = this.chunkDocument(docId, parsed.pages, parsed.text);
     if (chunks.length > 0) {
       const texts = chunks.map((c) => c.content);
-      const embeddings = await this.embeddingService.generateEmbeddings(texts);
+      const embeddings = await this.embeddingService.generateEmbeddings(texts, 'RETRIEVAL_DOCUMENT');
       chunks.forEach((chunk, idx) => {
         if (embeddings[idx]) {
           chunk.setEmbedding(embeddings[idx]);
@@ -289,7 +289,7 @@ export class ReindexDocumentUseCase {
     }
 
     const texts = chunks.map((c) => c.content);
-    const newEmbeddings = await this.embeddingService.generateEmbeddings(texts);
+    const newEmbeddings = await this.embeddingService.generateEmbeddings(texts, 'RETRIEVAL_DOCUMENT');
 
     chunks.forEach((chunk, idx) => {
       if (newEmbeddings[idx]) {

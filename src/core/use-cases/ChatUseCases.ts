@@ -55,7 +55,7 @@ export class AskDocumentChatUseCase {
     await this.chatRepository.saveMessage(userMsg);
 
     // RAG Pipeline
-    const queryEmbedding = await this.embeddingService.generateEmbedding(dto.question);
+    const queryEmbedding = await this.embeddingService.generateEmbedding(dto.question, 'RETRIEVAL_QUERY');
     const searchResults = await this.vectorStore.searchSimilar(dto.documentId, queryEmbedding, 5);
     const seenChunkIds = new Set<string>();
     const contextChunks = searchResults

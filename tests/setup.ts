@@ -10,4 +10,6 @@ if (typeof window !== 'undefined') {
 
 afterEach(() => {
   cleanup();
+  process.env.LLM_PROVIDER = 'mock';
 });
+

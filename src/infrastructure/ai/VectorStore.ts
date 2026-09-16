@@ -64,7 +64,13 @@ export class VectorStore implements IVectorStore {
 
       if (row.embedding && queryEmbedding.length > 0) {
         const chunkEmbedding = JSON.parse(row.embedding) as number[];
-        score = this.cosineSimilarity(queryEmbedding, chunkEmbedding);
+        if (chunkEmbedding.length !== queryEmbedding.length) {
+          this.db.prepare('UPDATE document_chunks SET embedding = NULL WHERE id = ?').run(row.id);
+          chunk.setEmbedding(null as any);
+          score = 0;
+        } else {
+          score = this.cosineSimilarity(queryEmbedding, chunkEmbedding);
+        }
       }
 
       scored.push({ chunk, score });
@@ -72,6 +78,33 @@ export class VectorStore implements IVectorStore {
 
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, topK);
+  }
+
+  public async invalidateIncompatibleEmbeddings(expectedDimension: number): Promise<number> {
+    const rows = this.db.prepare(
+      'SELECT id, embedding FROM document_chunks WHERE embedding IS NOT NULL'
+    ).all() as { id: string; embedding: string }[];
+
+    let invalidatedCount = 0;
+    const updateStmt = this.db.prepare('UPDATE document_chunks SET embedding = NULL WHERE id = ?');
+
+    const runTransaction = this.db.transaction(() => {
+      for (const row of rows) {
+        try {
+          const parsed = JSON.parse(row.embedding);
+          if (!Array.isArray(parsed) || parsed.length !== expectedDimension) {
+            updateStmt.run(row.id);
+            invalidatedCount++;
+          }
+        } catch {
+          updateStmt.run(row.id);
+          invalidatedCount++;
+        }
+      }
+    });
+
+    runTransaction();
+    return invalidatedCount;
   }
 
   public async searchKeyword(documentId: string, query: string): Promise<DocumentChunk[]> {
