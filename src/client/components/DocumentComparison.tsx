@@ -225,7 +225,16 @@ export const DocumentComparison: React.FC<DocumentComparisonProps> = ({
             >
               {loading ? (
                 <>
-                  <Loader2 size={16} className="spinner" aria-hidden="true" />
+                  <Loader2
+                    size={16}
+                    className="spinner animate-spin"
+                    style={{
+                      animation: 'spin 0.85s linear infinite',
+                      WebkitAnimation: 'spin 0.85s linear infinite',
+                      display: 'inline-block',
+                    }}
+                    aria-hidden="true"
+                  />
                   <span>Analyzing Diffs...</span>
                 </>
               ) : (

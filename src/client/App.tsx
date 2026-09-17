@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 import { LegalDisclaimerBanner } from './components/LegalDisclaimerBanner';
 import { Header, ActiveTab } from './components/Header';
 import { LandingPage } from './components/LandingPage';
@@ -30,6 +31,8 @@ export const App: React.FC = () => {
 
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<DocumentAnalysisDTO | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [subView, setSubView] = useState<'default' | 'upload' | 'search'>('default');
 
   useEffect(() => {
@@ -89,12 +92,18 @@ export const App: React.FC = () => {
     setSelectedDocId(docId);
     setSubView('default');
     setActiveTab('documents');
+    setAnalysisError(null);
+    setAnalysisLoading(true);
 
     try {
       const res = await api.getAnalysis(docId);
       setSelectedAnalysis(res.analysis);
-    } catch {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to analyze document';
+      setAnalysisError(msg);
       setSelectedAnalysis(null);
+    } finally {
+      setAnalysisLoading(false);
     }
   };
 
@@ -215,6 +224,7 @@ export const App: React.FC = () => {
                       onClick={() => {
                         setSelectedDocId(null);
                         setSelectedAnalysis(null);
+                        setAnalysisError(null);
                       }}
                       className="btn btn-secondary"
                     >
@@ -231,6 +241,50 @@ export const App: React.FC = () => {
                     onOpenBriefing={handleOpenBriefing}
                     onOpenSearch={handleOpenSearch}
                   />
+                </div>
+              ) : selectedDocument && (analysisLoading || analysisError) ? (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                    <button
+                      onClick={() => {
+                        setSelectedDocId(null);
+                        setSelectedAnalysis(null);
+                        setAnalysisError(null);
+                      }}
+                      className="btn btn-secondary"
+                    >
+                      ← All Documents
+                    </button>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
+                    {analysisLoading ? (
+                      <div>
+                        <Loader2
+                          size={44}
+                          className="spinner animate-spin"
+                          style={{
+                            color: 'var(--primary-600)',
+                            margin: '0 auto 1.25rem',
+                            animation: 'spin 0.85s linear infinite',
+                            WebkitAnimation: 'spin 0.85s linear infinite',
+                            display: 'inline-block',
+                          }}
+                          aria-hidden="true"
+                        />
+                        <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Analyzing Document with Gemini...</h3>
+                        <p style={{ color: 'var(--text-secondary)' }}>Extracting legal structure, plain-language summaries, clauses, and key risks.</p>
+                      </div>
+                    ) : (
+                      <div role="alert">
+                        <div style={{ color: 'var(--rose-500)', fontSize: '2rem', marginBottom: '0.75rem' }}>⚠️</div>
+                        <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Document Analysis Unavailable</h3>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', maxWidth: '600px', margin: '0 auto 1.5rem' }}>{analysisError}</p>
+                        <button onClick={() => handleOpenAnalyze(selectedDocument.id)} className="btn btn-primary">
+                          Retry Analysis
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div>

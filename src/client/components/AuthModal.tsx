@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Lock, Mail, User as UserIcon, Sparkles } from 'lucide-react';
+import { X, Lock, Mail, User as UserIcon, Sparkles, Loader2 } from 'lucide-react';
 import { api, SanitizedUser } from '../services/api';
 
 interface AuthModalProps {
@@ -315,9 +315,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             type="submit"
             disabled={loading}
             className="btn btn-primary"
-            style={{ width: '100%', marginTop: '0.5rem', padding: '0.75rem' }}
+            style={{
+              width: '100%',
+              marginTop: '0.5rem',
+              padding: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+            }}
           >
-            {loading ? 'Processing...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            {loading && <Loader2 size={16} className="spinner animate-spin" aria-hidden="true" />}
+            <span>{loading ? 'Processing...' : mode === 'login' ? 'Sign In' : 'Create Account'}</span>
           </button>
         </form>
 

@@ -155,7 +155,17 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onDocumentUploaded }) =>
 
         {uploading ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-            <Loader2 size={40} className="spinner" style={{ color: 'var(--primary-600)', animation: 'spin 1s linear infinite' }} aria-hidden="true" />
+            <Loader2
+              size={42}
+              className="spinner animate-spin"
+              style={{
+                color: 'var(--primary-600)',
+                animation: 'spin 0.85s linear infinite',
+                WebkitAnimation: 'spin 0.85s linear infinite',
+                display: 'inline-block',
+              }}
+              aria-hidden="true"
+            />
             <h3 style={{ fontSize: '1.2rem', fontWeight: 600 }}>{stage}</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
               Treating document as untrusted data, isolating user scope, and structuring plain-language summaries.

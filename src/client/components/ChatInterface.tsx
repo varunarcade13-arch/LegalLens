@@ -24,6 +24,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ document, onBack }
   const [messages, setMessages] = useState<ChatMessageDTO[]>([]);
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingStep, setLoadingStep] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedCitations, setExpandedCitations] = useState<Record<string, boolean>>({});
@@ -57,10 +58,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ document, onBack }
 
   const loadChat = async () => {
     try {
+      setLoadError(null);
       const res = await api.getChatHistory(document.id);
       setMessages(res.messages);
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load chat history';
+      setLoadError(msg);
     }
   };
 
@@ -199,6 +202,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ document, onBack }
         aria-live="polite"
         aria-label="Conversation with LegalLens AI"
       >
+        {loadError && (
+          <div role="alert" style={{ padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', background: 'var(--rose-bg)', color: 'var(--rose-600)', border: '1px solid var(--rose-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{loadError}</span>
+            <button onClick={loadChat} className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
+              Retry
+            </button>
+          </div>
+        )}
         {messages.length === 0 && (
           <div style={{ textAlign: 'center', margin: 'auto', maxWidth: '600px', padding: '2rem' }}>
             <div
@@ -428,7 +439,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ document, onBack }
 
         {loading && (
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', color: 'var(--text-muted)' }}>
-            <Loader2 size={18} className="spinner" aria-hidden="true" />
+            <Loader2
+              size={18}
+              className="spinner animate-spin"
+              style={{
+                animation: 'spin 0.85s linear infinite',
+                WebkitAnimation: 'spin 0.85s linear infinite',
+                display: 'inline-block',
+              }}
+              aria-hidden="true"
+            />
             <span style={{ fontSize: '0.875rem' }}>{loadingSteps[loadingStep]}</span>
           </div>
         )}

@@ -227,7 +227,14 @@ If the question cannot be answered from the document context, set:
     // Validate citations against actual retrieved chunks
     const validatedCitations: Citation[] = [];
     for (const citation of parsed.sourceCitations) {
-      const matchingChunk = contextChunks.find((c) => c.id === citation.chunkId);
+      let matchingChunk = contextChunks.find((c) => c.id === citation.chunkId);
+      if (!matchingChunk && citation.textSnippet && citation.textSnippet.trim().length > 10) {
+        const snippetClean = citation.textSnippet.trim().toLowerCase();
+        matchingChunk = contextChunks.find((c) =>
+          c.content.toLowerCase().includes(snippetClean.substring(0, Math.min(30, snippetClean.length)))
+        );
+      }
+
       if (matchingChunk) {
         const snippetValid =
           !citation.textSnippet ||
@@ -273,16 +280,46 @@ If the question cannot be answered from the document context, set:
       throw new AIServiceUnavailableError('Gemini API key is not configured.');
     }
 
+    const plainLangSummary = analysis?.plainLanguageSummary
+      ? typeof analysis.plainLanguageSummary === 'string'
+        ? analysis.plainLanguageSummary
+        : JSON.stringify(analysis.plainLanguageSummary)
+      : '';
+    const clausesSummary = (analysis?.clauses || [])
+      .map((c: any) => `- [${c.category || 'Clause'}] ${c.title || ''}: ${c.plainExplanation || c.whyItMatters || ''}`)
+      .slice(0, 10)
+      .join('\n');
+    const findingsSummary = (analysis?.findings || [])
+      .map((f: any) => `- [${f.category || 'Finding'}] ${f.finding}: ${f.whyItMatters || ''}`)
+      .slice(0, 10)
+      .join('\n');
+    const factsSummary = (analysis?.extractedFacts || [])
+      .map((f: any) => `- ${f.category || 'Fact'}: ${f.fact}`)
+      .slice(0, 10)
+      .join('\n');
+
     const prompt = `
 ${this.promptSecurity.getSystemGuardrails()}
 
 TASK: Generate an actionable lawyer consultation briefing for the document titled "${documentTitle}".
-Use the following document analysis to construct the brief:
-Summary: ${analysis.highLevelSummary || 'Standard agreement'}
-Document Type: ${analysis.documentType || 'Commercial contract'}
-Jurisdiction: ${analysis.jurisdiction || 'Applicable state law'}
-Effective Date: ${analysis.effectiveDate || 'Not specified'}
-Expiration Date: ${analysis.expirationDate || 'Not specified'}
+Use the following comprehensive document analysis to construct the brief:
+Summary: ${analysis?.highLevelSummary || 'Standard agreement'}
+Document Type: ${analysis?.documentType || 'Commercial contract'}
+Jurisdiction: ${analysis?.jurisdiction || 'Applicable state law'}
+Effective Date: ${analysis?.effectiveDate || 'Not specified'}
+Expiration Date: ${analysis?.expirationDate || 'Not specified'}
+
+PLAIN LANGUAGE SUMMARY & KEY RESPONSIBILITIES:
+${plainLangSummary || 'Not provided'}
+
+KEY EXTRACTED FACTS:
+${factsSummary || 'None extracted'}
+
+IMPORTANT CLAUSES:
+${clausesSummary || 'None extracted'}
+
+AREAS FOR ATTENTION / RISKS:
+${findingsSummary || 'None extracted'}
 
 Return a valid JSON object matching this schema:
 {

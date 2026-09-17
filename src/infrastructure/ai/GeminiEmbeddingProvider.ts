@@ -70,7 +70,7 @@ export class GeminiEmbeddingProvider implements IEmbeddingProvider {
 
     const data = (await res.json()) as any;
     const values = data?.embedding?.values;
-    if (!Array.isArray(values) || values.length === 0) {
+    if (!Array.isArray(values) || values.length === 0 || !values.every((v) => typeof v === 'number' && Number.isFinite(v))) {
       throw new AIServiceUnavailableError('Malformed embedding response from Gemini API.');
     }
 

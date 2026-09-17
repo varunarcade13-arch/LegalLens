@@ -3142,5 +3142,264 @@ describe('Frontend Client Coverage Boost', () => {
       const backBtn = screen.getByRole('button', { name: /back to analysis/i });
       fireEvent.click(backBtn);
     });
+
+    it('covers App analysisError state with Retry Analysis and All Documents buttons', async () => {
+      api.setToken('auth-token');
+      vi.spyOn(api, 'getProfile').mockResolvedValue({ user: mockUser });
+      vi.spyOn(api, 'listDocuments').mockResolvedValue({ documents: [mockDocA] });
+      vi.spyOn(api, 'getDashboardStats').mockResolvedValue({
+        totalDocuments: 1,
+        totalAnalyses: 0,
+        totalPendingActionItems: 0,
+        recentDocuments: [mockDocA],
+      });
+
+      // First time reject with a string to test non-Error fallback
+      vi.spyOn(api, 'getAnalysis').mockRejectedValueOnce('Custom string error');
+
+      render(<App />);
+      await waitFor(() => {
+        expect(screen.getByText(/welcome back, justice sandra/i)).toBeDefined();
+      });
+
+      // Switch to My Documents tab
+      const myDocsTab = screen.getByRole('button', { name: /my documents/i });
+      fireEvent.click(myDocsTab);
+
+      // Click analyze to trigger error
+      const analyzeBtn = screen.getByRole('button', { name: /^analyze$/i });
+      fireEvent.click(analyzeBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText(/document analysis unavailable/i)).toBeDefined();
+        expect(screen.getByText('Failed to analyze document')).toBeDefined();
+      });
+
+      // Click "Retry Analysis" button (mock resolving next)
+      vi.spyOn(api, 'getAnalysis').mockResolvedValueOnce({
+        analysis: {
+          id: 'ana-retried',
+          documentId: 'doc-final-a',
+          documentType: 'Agreement',
+          highLevelSummary: 'Retried summary',
+          plainLanguageSummary: {
+            whatThisDocumentIsAbout: 'Retried lease',
+            whatYouAreAgreeingTo: [],
+            whatTheOtherPartyIsAgreeingTo: [],
+            yourKeyResponsibilities: [],
+            yourRights: [],
+            importantDates: [],
+            financialObligations: [],
+            terminationConditions: [],
+          },
+          partiesInvolved: [],
+          keyDates: [],
+          financialTerms: [],
+          jurisdiction: 'CA',
+          governingLaw: 'California',
+          clauses: [],
+          findings: [],
+          actionChecklist: [],
+          extractedFacts: [],
+          createdAt: '',
+          updatedAt: '',
+        },
+      });
+
+      const retryBtn = screen.getByRole('button', { name: /retry analysis/i });
+      fireEvent.click(retryBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText('Retried lease')).toBeDefined();
+      });
+
+      // Now trigger error again to test "← All Documents" button
+      vi.spyOn(api, 'getAnalysis').mockRejectedValueOnce(new Error('Analysis broke'));
+      // Navigate back and re-analyze
+      const allDocsBtn1 = screen.getByRole('button', { name: /← all documents/i });
+      fireEvent.click(allDocsBtn1);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /^analyze$/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /^analyze$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Analysis broke')).toBeDefined();
+      });
+
+      const allDocsBtnFromError = screen.getByRole('button', { name: /← all documents/i });
+      fireEvent.click(allDocsBtnFromError);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Analysis broke')).toBeNull();
+      });
+    });
+
+    it('covers ActionableBriefingView error onBack, retry, and actionError alert dismiss', async () => {
+      const onBackMock = vi.fn();
+      vi.spyOn(api, 'getBriefing').mockRejectedValueOnce(new Error('Briefing load failed'));
+
+      render(<ActionableBriefingView document={mockDocA} onBack={onBackMock} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/failed to load lawyer briefing/i)).toBeDefined();
+      });
+
+      // Click "Back to Documents"
+      const backBtn = screen.getByRole('button', { name: /back to documents/i });
+      fireEvent.click(backBtn);
+      expect(onBackMock).toHaveBeenCalled();
+
+      // Click "Retry Briefing" (mock successful resolution)
+      vi.spyOn(api, 'getBriefing').mockResolvedValueOnce({
+        briefing: {
+          id: 'b-loaded',
+          userId: 'u1',
+          documentId: 'doc-final-a',
+          documentTitle: 'Test Agreement',
+          conciseSummary: 'Executive brief text',
+          lawyerChecklist: {
+            questionsToAsk: ['Is liability capped?'],
+            documentsToBring: ['Amendments'],
+            keyConcerns: ['Indemnity'],
+            importantDeadlines: ['30 days notice'],
+            clarificationAreas: [],
+          },
+          actionChecklist: [
+            { id: 'chk-1', label: 'Action item 1', completed: false, category: 'general' },
+          ],
+          createdAt: '',
+          updatedAt: '',
+        },
+      });
+
+      const retryBtn = screen.getByRole('button', { name: /retry briefing/i });
+      fireEvent.click(retryBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText('Executive brief text')).toBeDefined();
+      });
+
+      // Trigger actionError by failing toggleChecklist
+      vi.spyOn(api, 'toggleChecklist').mockRejectedValueOnce(new Error('Checklist update failed'));
+      const checkbox = screen.getByRole('checkbox');
+      fireEvent.click(checkbox);
+
+      await waitFor(() => {
+        expect(screen.getByText('Checklist update failed')).toBeDefined();
+      });
+
+      // Click dismiss button ✕ on actionError
+      const dismissBtn = screen.getByRole('button', { name: '✕' });
+      fireEvent.click(dismissBtn);
+
+      expect(screen.queryByText('Checklist update failed')).toBeNull();
+    });
+
+    it('covers ChatInterface loadError non-Error fallback and Retry button', async () => {
+      // Reject with a plain string to test fallback msg logic
+      vi.spyOn(api, 'getChatHistory').mockRejectedValueOnce('Network timeout occurred');
+
+      render(<ChatInterface document={mockDocA} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load chat history')).toBeDefined();
+      });
+
+      // Mock successful chat history for retry
+      vi.spyOn(api, 'getChatHistory').mockResolvedValueOnce({
+        messages: [
+          {
+            id: 'm1',
+            userId: 'u1',
+            documentId: 'doc-final-a',
+            role: 'assistant',
+            content: 'Hello, how can I help you?',
+            structuredAnswer: null,
+            createdAt: '',
+          },
+        ],
+      });
+
+      const retryBtn = screen.getByRole('button', { name: /retry/i });
+      fireEvent.click(retryBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText('Hello, how can I help you?')).toBeDefined();
+        expect(screen.queryByText('Failed to load chat history')).toBeNull();
+      });
+    });
+
+    it('covers ActionableBriefingView non-Error catch branches and null briefing without error', async () => {
+      // 1. null briefing without error (line 108 : '' branch)
+      vi.spyOn(api, 'getBriefing').mockResolvedValueOnce({ briefing: null as any });
+      const { unmount } = render(<ActionableBriefingView document={mockDocA} />);
+      await waitFor(() => {
+        expect(screen.getByText('Could not load briefing for this document.')).toBeDefined();
+      });
+      unmount();
+
+      // 2. getBriefing rejected with string (line 42 false branch)
+      vi.spyOn(api, 'getBriefing').mockRejectedValueOnce('Custom load briefing string error');
+      const { unmount: unmount2 } = render(<ActionableBriefingView document={mockDocA} />);
+      await waitFor(() => {
+        expect(screen.getByText(/could not load briefing for this document/i)).toBeDefined();
+      });
+      unmount2();
+
+      // 3. Render loaded briefing to test toggle, copy, download non-Error catches (lines 55, 68, 87)
+      vi.spyOn(api, 'getBriefing').mockResolvedValue({
+        briefing: {
+          id: 'b-loaded-2',
+          userId: 'u1',
+          documentId: 'doc-final-a',
+          documentTitle: 'Test Agreement',
+          conciseSummary: 'Briefing text for non-Error tests',
+          lawyerChecklist: {
+            questionsToAsk: ['Q1'],
+            documentsToBring: ['D1'],
+            keyConcerns: ['C1'],
+            importantDeadlines: ['30 days'],
+            clarificationAreas: [],
+          },
+          actionChecklist: [
+            { id: 'chk-1', label: 'Action item 1', completed: false, category: 'general' },
+          ],
+          createdAt: '',
+          updatedAt: '',
+        },
+      });
+
+      render(<ActionableBriefingView document={mockDocA} />);
+      await waitFor(() => {
+        expect(screen.getByText('Briefing text for non-Error tests')).toBeDefined();
+      });
+
+      // Toggle checklist rejected with string (line 55 false branch)
+      vi.spyOn(api, 'toggleChecklist').mockRejectedValueOnce('String toggle error');
+      const checkbox = screen.getByRole('checkbox');
+      fireEvent.click(checkbox);
+      await waitFor(() => {
+        expect(screen.getByText('Failed to update checklist item')).toBeDefined();
+      });
+
+      // Copy markdown rejected with string (line 68 false branch)
+      vi.spyOn(api, 'exportBriefingMarkdown').mockRejectedValueOnce('String export error');
+      const copyBtn = screen.getByRole('button', { name: /copy briefing/i });
+      fireEvent.click(copyBtn);
+      await waitFor(() => {
+        expect(screen.getByText('Failed to export markdown')).toBeDefined();
+      });
+
+      // Download markdown rejected with string (line 87 false branch)
+      vi.spyOn(api, 'exportBriefingMarkdown').mockRejectedValueOnce('String download error');
+      const downloadBtn = screen.getByRole('button', { name: /download markdown/i });
+      fireEvent.click(downloadBtn);
+      await waitFor(() => {
+        expect(screen.getByText('Failed to download briefing markdown')).toBeDefined();
+      });
+    });
   });
 });

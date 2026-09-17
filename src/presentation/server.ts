@@ -35,4 +35,6 @@ app.get('*', (req, res, next) => {
 
 app.listen(port, () => {
   console.log(`LegalLens Server is running on port ${port}`);
+  console.log(`LLM Provider: ${process.env.LLM_PROVIDER || 'gemini'} | Model: ${process.env.GEMINI_MODEL || 'gemini-3.6-flash'} | Embedding: ${process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001'}`);
+  console.log(`Database: ${dbPath}`);
 });

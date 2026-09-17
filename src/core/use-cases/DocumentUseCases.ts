@@ -76,6 +76,15 @@ export class UploadDocumentUseCase {
         }
       });
       await this.vectorStore.upsertChunks(chunks);
+
+      if (process.env.NODE_ENV !== 'test') {
+        const embeddedCount = chunks.filter((c) => Boolean(c.embedding)).length;
+        const dim = chunks[0]?.embedding?.length || 0;
+        console.log(`Document chunks: ${chunks.length}`);
+        console.log(`Embedded chunks: ${embeddedCount}`);
+        console.log(`Stored vectors: ${chunks.length}`);
+        console.log(`Embedding dimension: ${dim}`);
+      }
     }
 
     return legalDoc;

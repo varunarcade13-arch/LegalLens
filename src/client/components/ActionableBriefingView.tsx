@@ -24,6 +24,8 @@ export const ActionableBriefingView: React.FC<ActionableBriefingViewProps> = ({
 }) => {
   const [briefing, setBriefing] = useState<LegalBriefingDTO | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -33,10 +35,12 @@ export const ActionableBriefingView: React.FC<ActionableBriefingViewProps> = ({
   const loadBriefing = async () => {
     try {
       setLoading(true);
+      setError(null);
       const res = await api.getBriefing(document.id);
       setBriefing(res.briefing);
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not load briefing for this document.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -44,26 +48,31 @@ export const ActionableBriefingView: React.FC<ActionableBriefingViewProps> = ({
 
   const handleToggle = async (itemId: string, currentCompleted: boolean) => {
     try {
+      setActionError(null);
       const res = await api.toggleChecklist(document.id, itemId, !currentCompleted);
       setBriefing(res.briefing);
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update checklist item';
+      setActionError(msg);
     }
   };
 
   const handleCopyMarkdown = async () => {
     try {
+      setActionError(null);
       const markdown = await api.exportBriefingMarkdown(document.id);
       await navigator.clipboard.writeText(markdown);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to export markdown';
+      setActionError(msg);
     }
   };
 
   const handleDownloadMarkdown = async () => {
     try {
+      setActionError(null);
       const markdown = await api.exportBriefingMarkdown(document.id);
       const blob = new Blob([markdown], { type: 'text/markdown' });
       const url = URL.createObjectURL(blob);
@@ -74,25 +83,51 @@ export const ActionableBriefingView: React.FC<ActionableBriefingViewProps> = ({
       a.click();
       window.document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to download briefing markdown';
+      setActionError(msg);
     }
   };
 
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '4rem 1rem' }}>
-        <Loader2 size={36} className="spinner" style={{ color: 'var(--primary-600)', margin: '0 auto 1rem' }} aria-hidden="true" />
+        <Loader2
+          size={44}
+          className="spinner animate-spin"
+          style={{
+            color: 'var(--primary-600)',
+            margin: '0 auto 1.25rem',
+            animation: 'spin 0.85s linear infinite',
+            WebkitAnimation: 'spin 0.85s linear infinite',
+            display: 'inline-block',
+          }}
+          aria-hidden="true"
+        />
         <h3>Generating Actionable Lawyer Briefing...</h3>
         <p style={{ color: 'var(--text-secondary)' }}>Synthesizing consultation questions, evidence checklist, and action items.</p>
       </div>
     );
   }
 
-  if (!briefing) {
+  if (error || !briefing) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-        <p style={{ color: 'var(--text-secondary)' }}>Could not load briefing for this document.</p>
+        <div style={{ color: 'var(--rose-500)', fontSize: '2rem', marginBottom: '0.75rem' }}>⚠️</div>
+        <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Failed to Load Lawyer Briefing</h3>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', maxWidth: '600px', margin: '0 auto 1.5rem' }}>
+          Could not load briefing for this document.{error ? ` (${error})` : ''}
+        </p>
+        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+          {onBack && (
+            <button onClick={onBack} className="btn btn-secondary">
+              Back to Documents
+            </button>
+          )}
+          <button onClick={loadBriefing} className="btn btn-primary">
+            Retry Briefing
+          </button>
+        </div>
       </div>
     );
   }
@@ -103,6 +138,12 @@ export const ActionableBriefingView: React.FC<ActionableBriefingViewProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      {actionError && (
+        <div role="alert" style={{ padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', background: 'var(--rose-bg)', color: 'var(--rose-600)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>✕</button>
+        </div>
+      )}
       {/* Action Bar */}
       <div
         style={{

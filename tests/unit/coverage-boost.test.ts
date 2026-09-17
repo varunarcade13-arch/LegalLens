@@ -14,6 +14,7 @@ import {
 } from '../../src/core/domain';
 import { GetDocumentAnalysisUseCase } from '../../src/core/use-cases/AnalysisUseCases';
 import { UploadDocumentUseCase } from '../../src/core/use-cases/DocumentUseCases';
+import { AskDocumentChatUseCase } from '../../src/core/use-cases/ChatUseCases';
 import { DocxDocumentParser } from '../../src/infrastructure/parsers/DocxDocumentParser';
 import { PdfDocumentParser } from '../../src/infrastructure/parsers/PdfDocumentParser';
 import { DocumentParserFactory } from '../../src/infrastructure/parsers/DocumentParserFactory';
@@ -1240,6 +1241,268 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
       };
       const answer = await provider.answerGroundedQuestion('What about arbitration?', [chunkWithoutHeading]);
       expect(answer.shortAnswer).toBeDefined();
+    });
+
+    it('covers errorHandlerMiddleware logging when NODE_ENV !== "test"', () => {
+      const origEnv = process.env.NODE_ENV;
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        process.env.NODE_ENV = 'development';
+        const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+        const next = vi.fn();
+        errorHandlerMiddleware(new Error('Test server failure'), {} as any, res, next);
+        expect(consoleSpy).toHaveBeenCalledWith('[Server Error]:', expect.any(Error));
+      } finally {
+        process.env.NODE_ENV = origEnv;
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('covers UploadDocumentUseCase logging when NODE_ENV !== "test"', async () => {
+      const origEnv = process.env.NODE_ENV;
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        process.env.NODE_ENV = 'development';
+        const docRepo = {
+          create: vi.fn().mockResolvedValue(undefined),
+        };
+        const mockParser = {
+          parse: vi.fn().mockResolvedValue({
+            text: 'Section 1. Agreement terms\n\nFull lease contract terms.',
+            pageCount: 1,
+            pages: [{ pageNumber: 1, text: 'Section 1. Agreement terms\n\nFull lease contract terms.' }],
+          }),
+        };
+        const embedService = {
+          generateEmbeddings: vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]]),
+        };
+        const vectorStore = {
+          upsertChunks: vi.fn().mockResolvedValue(undefined),
+        };
+        const validator = {
+          validate: vi.fn().mockReturnValue({
+            valid: true,
+            detectedType: 'text/plain',
+            safeFilename: 'test.txt',
+            mimeType: 'text/plain',
+          }),
+        };
+
+        const uploadUseCase = new UploadDocumentUseCase(
+          docRepo,
+          mockParser as any,
+          embedService as any,
+          vectorStore as any,
+          validator as any
+        );
+
+        await uploadUseCase.execute({
+          userId: 'u-dev-log',
+          file: {
+            originalname: 'lease.txt',
+            mimetype: 'text/plain',
+            size: 200,
+            buffer: Buffer.from('Section 1. Agreement terms\n\nFull lease contract terms.'),
+          },
+        });
+
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Document chunks:'));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Embedded chunks:'));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Stored vectors:'));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Embedding dimension:'));
+
+        // Test branch where chunks[0]?.embedding is null (dim || 0)
+        embedService.generateEmbeddings.mockResolvedValueOnce([]);
+        await uploadUseCase.execute({
+          userId: 'u-dev-log',
+          file: {
+            originalname: 'lease2.txt',
+            mimetype: 'text/plain',
+            size: 200,
+            buffer: Buffer.from('Section 1. Terms'),
+          },
+        });
+        expect(consoleSpy).toHaveBeenCalledWith('Embedding dimension: 0');
+      } finally {
+        process.env.NODE_ENV = origEnv;
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('covers AskDocumentChatUseCase logging when NODE_ENV !== "test" with results and empty results', async () => {
+      const origEnv = process.env.NODE_ENV;
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        process.env.NODE_ENV = 'development';
+        const docRepo = {
+          findById: vi.fn().mockResolvedValue(
+            new LegalDocument({
+              id: 'd-chat-log',
+              userId: 'u1',
+              title: 'Doc',
+              originalFilename: 'doc.pdf',
+              mimeType: 'application/pdf',
+              fileSizeBytes: 100,
+              storagePath: '/data/doc.pdf',
+              pageCount: 1,
+              characterCount: 50,
+              status: 'ready',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })
+          ),
+        } as any;
+        const chatRepo = {
+          saveMessage: vi.fn().mockResolvedValue(undefined),
+        } as any;
+
+        const testChunk = new DocumentChunk({
+          id: 'chk-log-1',
+          documentId: 'd-chat-log',
+          chunkIndex: 0,
+          pageNumber: 2,
+          sectionHeading: 'Rent Terms',
+          content: 'Monthly rent is $2,000 payable on the first.',
+          tokenCount: 10,
+        });
+
+        const vectorStoreWithResults = {
+          searchSimilar: vi.fn().mockResolvedValue([{ chunk: testChunk, score: 0.95 }]),
+        };
+        const embeddingService = {
+          generateEmbedding: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        };
+        const llmProvider = {
+          answerGroundedQuestion: vi.fn().mockResolvedValue({
+            shortAnswer: 'Monthly rent is $2,000.',
+            detailedAnalysis: 'Rent is $2000.',
+            confidenceScore: 0.95,
+            isGroundedInDocument: true,
+            citations: [{ chunkId: 'chk-log-1', pageNumber: 2, sectionHeading: 'Rent Terms', textSnippet: 'Monthly rent is $2,000', whyRelevant: 'Answers question' }],
+          }),
+        };
+
+        const useCase = new AskDocumentChatUseCase(
+          docRepo,
+          chatRepo,
+          vectorStoreWithResults as any,
+          embeddingService as any,
+          llmProvider as any
+        );
+
+        await useCase.execute({
+          userId: 'u1',
+          documentId: 'd-chat-log',
+          question: 'What is the rent?',
+        });
+
+        expect(consoleSpy).toHaveBeenCalledWith('Query: What is the rent?');
+        expect(consoleSpy).toHaveBeenCalledWith('Retrieved chunks: 1');
+        expect(consoleSpy).toHaveBeenCalledWith('Top similarity: 0.9500');
+        expect(consoleSpy).toHaveBeenCalledWith('Top chunk page: 2');
+        expect(consoleSpy).toHaveBeenCalledWith('Top chunk text snippet: Monthly rent is $2,000 payable on the first.');
+
+        // Also test branch where searchResults is empty / undefined score
+        const vectorStoreEmpty = {
+          searchSimilar: vi.fn().mockResolvedValue([]),
+        };
+        const useCaseEmpty = new AskDocumentChatUseCase(
+          docRepo,
+          chatRepo,
+          vectorStoreEmpty as any,
+          embeddingService as any,
+          llmProvider as any
+        );
+
+        await useCaseEmpty.execute({
+          userId: 'u1',
+          documentId: 'd-chat-log',
+          question: 'No results query?',
+        });
+
+        expect(consoleSpy).toHaveBeenCalledWith('Top similarity: N/A');
+        expect(consoleSpy).toHaveBeenCalledWith('Top chunk text snippet: N/A');
+      } finally {
+        process.env.NODE_ENV = origEnv;
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('covers GeminiLLMProvider generateBriefing when plainLanguageSummary is a string', async () => {
+      const gemini = new GeminiLLMProvider('test-api-key');
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      conciseSummary: 'Executive summary for client.',
+                      lawyerChecklist: {
+                        questionsToAsk: ['Can rent increase?'],
+                        documentsToBring: ['Lease'],
+                        importantDeadlines: ['30 days'],
+                        keyConcerns: ['Deposit retention'],
+                        clarificationAreas: ['Maintenance'],
+                      },
+                      actionChecklist: [{ id: 'act-1', label: 'Sign lease', category: 'General', completed: false }],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as any);
+
+      const briefing = await gemini.generateBriefing('Lease Agreement', {
+        plainLanguageSummary: 'This is a string summary of the agreement.',
+        clauses: [{ category: 'rent', title: 'Monthly Rent', plainExplanation: '$2000' }],
+        findings: [{ category: 'review_carefully', finding: 'Notice required', whyItMatters: 'Important' }],
+        extractedFacts: [{ category: 'financial', fact: '$2000 per month' }],
+      });
+
+      expect(briefing.conciseSummary).toBe('Executive summary for client.');
+
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      conciseSummary: 'Summary with fallbacks.',
+                      lawyerChecklist: {
+                        questionsToAsk: [],
+                        documentsToBring: [],
+                        importantDeadlines: [],
+                        keyConcerns: [],
+                        clarificationAreas: [],
+                      },
+                      actionChecklist: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as any);
+
+      const briefingWithFallbacks = await gemini.generateBriefing('Lease Agreement', {
+        plainLanguageSummary: 'String summary',
+        clauses: [
+          { category: '', title: '', plainExplanation: '', whyItMatters: '' },
+          { category: 'General', title: 'Clause', plainExplanation: '', whyItMatters: 'Matter' },
+        ],
+        findings: [{ category: '', finding: 'Finding', whyItMatters: '' }],
+        extractedFacts: [{ category: '', fact: 'Fact' }],
+      });
+      expect(briefingWithFallbacks.conciseSummary).toBe('Summary with fallbacks.');
     });
   });
 });

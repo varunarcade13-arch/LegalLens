@@ -67,6 +67,16 @@ export class AskDocumentChatUseCase {
       })
       .slice(0, 4);
 
+    if (process.env.NODE_ENV !== 'test') {
+      const topResult = searchResults[0];
+      const topSnippet = topResult?.chunk?.content ? topResult.chunk.content.substring(0, 80).replace(/\n+/g, ' ') : 'N/A';
+      console.log(`Query: ${dto.question.trim()}`);
+      console.log(`Retrieved chunks: ${contextChunks.length}`);
+      console.log(`Top similarity: ${topResult?.score !== undefined ? topResult.score.toFixed(4) : 'N/A'}`);
+      console.log(`Top chunk page: ${topResult?.chunk?.pageNumber || 1}`);
+      console.log(`Top chunk text snippet: ${topSnippet}`);
+    }
+
     // Answer grounded question
     const structuredAnswer = await this.llmProvider.answerGroundedQuestion(dto.question.trim(), contextChunks);
 

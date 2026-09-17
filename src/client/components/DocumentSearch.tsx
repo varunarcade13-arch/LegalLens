@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search as SearchIcon, X, FileText, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Search as SearchIcon, X, FileText, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
 
 interface SearchResultItem {
@@ -121,8 +121,14 @@ export const DocumentSearch: React.FC<DocumentSearchProps> = ({
               </button>
             )}
           </div>
-          <button type="submit" disabled={searching} className="btn btn-primary">
-            {searching ? 'Searching...' : 'Search'}
+          <button
+            type="submit"
+            disabled={searching}
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          >
+            {searching && <Loader2 size={16} className="spinner animate-spin" aria-hidden="true" />}
+            <span>{searching ? 'Searching...' : 'Search'}</span>
           </button>
         </form>
 

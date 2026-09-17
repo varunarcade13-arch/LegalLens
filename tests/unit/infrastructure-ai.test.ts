@@ -14,6 +14,11 @@ import { LegalDocument } from '../../src/core/domain/LegalDocument';
 import { SqliteDocumentRepository } from '../../src/infrastructure/db/repositories/SqliteDocumentRepository';
 import { SqliteUserRepository } from '../../src/infrastructure/db/repositories/SqliteUserRepository';
 import { User } from '../../src/core/domain/User';
+import {
+  computeCosineSimilarity,
+  verifyGeminiGeneration,
+  verifyGeminiEmbeddings,
+} from '../../src/infrastructure/ai/verify_gemini';
 
 describe('Infrastructure AI & RAG Units', () => {
   describe('PromptSecurityService', () => {
@@ -499,6 +504,66 @@ laws of the State of Delaware.
         expect(doc.title).toBeDefined();
         expect(doc.filename).toBeDefined();
       }
+    });
+  });
+
+  describe('Independent Gemini Verification Utilities', () => {
+    it('calculates cosine similarity correctly and handles zero/mismatch edge cases', () => {
+      expect(computeCosineSimilarity([1, 0], [1, 0])).toBe(1);
+      expect(computeCosineSimilarity([1, 0], [0, 1])).toBe(0);
+      expect(computeCosineSimilarity([], [1])).toBe(0);
+      expect(computeCosineSimilarity([1, 2], [1])).toBe(0);
+      expect(computeCosineSimilarity([0, 0], [1, 1])).toBe(0);
+      expect(computeCosineSimilarity([1, 1], [0, 0])).toBe(0);
+    });
+
+    it('verifies Gemini generation success and failure paths', async () => {
+      const origFetch = global.fetch;
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: '4' }] } }],
+        }),
+      });
+
+      const res = await verifyGeminiGeneration('key-123', 'gemini-3.6-flash');
+      expect(res.requestSuccessful).toBe(true);
+      expect(res.extractedText).toBe('4');
+
+      // Empty text fallback
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ candidates: [] }),
+      });
+      const emptyRes = await verifyGeminiGeneration();
+      expect(emptyRes.responseReceived).toBe(false);
+
+      // Failure path
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+      });
+      await expect(verifyGeminiGeneration('bad-key')).rejects.toThrow('Generation failed with HTTP 500');
+
+      global.fetch = origFetch;
+    });
+
+    it('verifies Gemini embeddings generation and cosine similarity calculation', async () => {
+      const origFetch = global.fetch;
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          embedding: { values: [0.1, 0.2, 0.3, 0.4] },
+        }),
+      });
+
+      const res = await verifyGeminiEmbeddings('key-123', 'gemini-embedding-001');
+      expect(res.documentEmbeddingLength).toBe(4);
+      expect(res.queryEmbeddingLength).toBe(4);
+      expect(res.allFinite).toBe(true);
+      expect(res.valid).toBe(true);
+
+      global.fetch = origFetch;
     });
   });
 });

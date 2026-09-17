@@ -8,6 +8,10 @@ export function errorHandlerMiddleware(
   res: Response,
   _next: NextFunction
 ): void {
+  if (process.env.NODE_ENV !== 'test') {
+    console.error('[Server Error]:', err);
+  }
+
   if (err instanceof DomainError) {
     res.status(err.statusCode).json({
       error: {
