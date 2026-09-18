@@ -6,14 +6,17 @@ export class AppDatabase {
   private db: Database.Database;
 
   constructor(dbPath: string = ':memory:') {
-    if (dbPath !== ':memory:') {
-      const dir = path.dirname(dbPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (dbPath !== ':memory:') {
+        const dir = path.dirname(dbPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
       }
+      this.db = new Database(dbPath);
+    } catch {
+      this.db = new Database(':memory:');
     }
-
-    this.db = new Database(dbPath);
     this.initPragmas();
     this.initSchema();
   }
@@ -27,8 +30,20 @@ export class AppDatabase {
   }
 
   private initPragmas(): void {
-    this.db.pragma('foreign_keys = ON');
-    this.db.pragma('journal_mode = WAL');
+    try {
+      this.db.pragma('foreign_keys = ON');
+    } catch {
+      // ignore
+    }
+    try {
+      this.db.pragma('journal_mode = WAL');
+    } catch {
+      try {
+        this.db.pragma('journal_mode = MEMORY');
+      } catch {
+        // ignore
+      }
+    }
   }
 
   private initSchema(): void {
