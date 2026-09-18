@@ -1289,7 +1289,7 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
         };
 
         const uploadUseCase = new UploadDocumentUseCase(
-          docRepo,
+          docRepo as any,
           mockParser as any,
           embedService as any,
           vectorStore as any,
