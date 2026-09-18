@@ -1,6 +1,14 @@
-import { Database as SqliteDb } from 'better-sqlite3';
-import { DocumentAnalysis, ExtractedFact, PlainLanguageSummary } from '../../../core/domain/DocumentAnalysis';
-import { ImportantClause, ClauseCategory, ConcernLevel } from '../../../core/domain/ImportantClause';
+import { IDatabaseClient } from '../Database';
+import {
+  DocumentAnalysis,
+  ExtractedFact,
+  PlainLanguageSummary,
+} from '../../../core/domain/DocumentAnalysis';
+import {
+  ImportantClause,
+  ClauseCategory,
+  ConcernLevel,
+} from '../../../core/domain/ImportantClause';
 import { AttentionFinding } from '../../../core/domain/AttentionFinding';
 import { IAnalysisRepository } from '../../../core/ports';
 
@@ -46,48 +54,50 @@ interface FindingRow {
 }
 
 export class SqliteAnalysisRepository implements IAnalysisRepository {
-  constructor(private db: SqliteDb) {}
+  constructor(private db: IDatabaseClient) {}
 
   public async save(analysis: DocumentAnalysis): Promise<void> {
-    const saveTransaction = this.db.transaction(() => {
-      // Clean up previous analysis if exists
-      this.db.prepare(`DELETE FROM analyses WHERE document_id = ?`).run(analysis.documentId);
-      this.db.prepare(`DELETE FROM important_clauses WHERE document_id = ?`).run(analysis.documentId);
-      this.db.prepare(`DELETE FROM attention_findings WHERE document_id = ?`).run(analysis.documentId);
-
-      const stmtAnalysis = this.db.prepare(`
-        INSERT INTO analyses (
+    const statements: { sql: string; args?: any[] }[] = [
+      {
+        sql: 'DELETE FROM analyses WHERE document_id = ?',
+        args: [analysis.documentId],
+      },
+      {
+        sql: 'DELETE FROM important_clauses WHERE document_id = ?',
+        args: [analysis.documentId],
+      },
+      {
+        sql: 'DELETE FROM attention_findings WHERE document_id = ?',
+        args: [analysis.documentId],
+      },
+      {
+        sql: `INSERT INTO analyses (
           id, document_id, document_type, parties_involved, effective_date,
           expiration_date, jurisdiction, high_level_summary,
           plain_language_summary, extracted_facts, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      stmtAnalysis.run(
-        analysis.id,
-        analysis.documentId,
-        analysis.documentType,
-        JSON.stringify(analysis.partiesInvolved),
-        analysis.effectiveDate,
-        analysis.expirationDate,
-        analysis.jurisdiction,
-        analysis.highLevelSummary,
-        JSON.stringify(analysis.plainLanguageSummary),
-        JSON.stringify(analysis.extractedFacts),
-        analysis.createdAt.toISOString(),
-        analysis.updatedAt.toISOString()
-      );
-
-      const stmtClause = this.db.prepare(`
-        INSERT INTO important_clauses (
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          analysis.id,
+          analysis.documentId,
+          analysis.documentType,
+          JSON.stringify(analysis.partiesInvolved),
+          analysis.effectiveDate,
+          analysis.expirationDate,
+          analysis.jurisdiction,
+          analysis.highLevelSummary,
+          JSON.stringify(analysis.plainLanguageSummary),
+          JSON.stringify(analysis.extractedFacts),
+          analysis.createdAt.toISOString(),
+          analysis.updatedAt.toISOString(),
+        ],
+      },
+      ...analysis.clauses.map((clause) => ({
+        sql: `INSERT INTO important_clauses (
           id, document_id, category, title, original_text,
           plain_explanation, why_it_matters, concern_level,
           page_number, section_heading
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      for (const clause of analysis.clauses) {
-        stmtClause.run(
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
           clause.id,
           clause.documentId,
           clause.category,
@@ -97,20 +107,16 @@ export class SqliteAnalysisRepository implements IAnalysisRepository {
           clause.whyItMatters,
           clause.concernLevel,
           clause.pageNumber,
-          clause.sectionHeading
-        );
-      }
-
-      const stmtFinding = this.db.prepare(`
-        INSERT INTO attention_findings (
+          clause.sectionHeading,
+        ],
+      })),
+      ...analysis.findings.map((finding) => ({
+        sql: `INSERT INTO attention_findings (
           id, document_id, category, finding, why_it_matters,
           source_reference, page_number, section_heading,
           questions_to_consider, suggested_professional_follow_up
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      for (const finding of analysis.findings) {
-        stmtFinding.run(
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
           finding.id,
           finding.documentId,
           finding.category,
@@ -120,22 +126,24 @@ export class SqliteAnalysisRepository implements IAnalysisRepository {
           finding.pageNumber,
           finding.sectionHeading,
           JSON.stringify(finding.questionsToConsider),
-          finding.suggestedProfessionalFollowUp
-        );
-      }
-    });
+          finding.suggestedProfessionalFollowUp,
+        ],
+      })),
+    ];
 
-    saveTransaction();
+    await this.db.batch(statements);
   }
 
   public async findByDocumentId(documentId: string): Promise<DocumentAnalysis | null> {
-    const stmt = this.db.prepare(`SELECT * FROM analyses WHERE document_id = ?`);
-    const row = stmt.get(documentId) as AnalysisRow | undefined;
+    const row = await this.db.get<AnalysisRow>('SELECT * FROM analyses WHERE document_id = ?', [
+      documentId,
+    ]);
     if (!row) return null;
 
-    const clauseRows = this.db
-      .prepare(`SELECT * FROM important_clauses WHERE document_id = ?`)
-      .all(documentId) as ClauseRow[];
+    const clauseRows = await this.db.all<ClauseRow>(
+      'SELECT * FROM important_clauses WHERE document_id = ?',
+      [documentId]
+    );
 
     const clauses = clauseRows.map(
       (c) =>
@@ -153,9 +161,10 @@ export class SqliteAnalysisRepository implements IAnalysisRepository {
         })
     );
 
-    const findingRows = this.db
-      .prepare(`SELECT * FROM attention_findings WHERE document_id = ?`)
-      .all(documentId) as FindingRow[];
+    const findingRows = await this.db.all<FindingRow>(
+      'SELECT * FROM attention_findings WHERE document_id = ?',
+      [documentId]
+    );
 
     const findings = findingRows.map(
       (f) =>
@@ -192,11 +201,10 @@ export class SqliteAnalysisRepository implements IAnalysisRepository {
   }
 
   public async deleteByDocumentId(documentId: string): Promise<void> {
-    const deleteTransaction = this.db.transaction(() => {
-      this.db.prepare(`DELETE FROM attention_findings WHERE document_id = ?`).run(documentId);
-      this.db.prepare(`DELETE FROM important_clauses WHERE document_id = ?`).run(documentId);
-      this.db.prepare(`DELETE FROM analyses WHERE document_id = ?`).run(documentId);
-    });
-    deleteTransaction();
+    await this.db.batch([
+      { sql: 'DELETE FROM attention_findings WHERE document_id = ?', args: [documentId] },
+      { sql: 'DELETE FROM important_clauses WHERE document_id = ?', args: [documentId] },
+      { sql: 'DELETE FROM analyses WHERE document_id = ?', args: [documentId] },
+    ]);
   }
 }

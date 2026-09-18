@@ -7,8 +7,20 @@ let cachedApp: any = null;
 
 function getApp() {
   if (!cachedApp) {
-    const dbPath = process.env.DATABASE_PATH || path.join(os.tmpdir(), 'legallens.sqlite');
-    const db = new AppDatabase(dbPath);
+    let db: AppDatabase;
+    if (process.env.TURSO_DATABASE_URL) {
+      if (!process.env.TURSO_AUTH_TOKEN) {
+        throw new Error('TURSO_AUTH_TOKEN environment variable is required when TURSO_DATABASE_URL is configured.');
+      }
+      db = new AppDatabase({
+        url: process.env.TURSO_DATABASE_URL,
+        authToken: process.env.TURSO_AUTH_TOKEN,
+      });
+    } else {
+      const dbPath = process.env.DATABASE_PATH || path.join(os.tmpdir(), 'legallens.sqlite');
+      db = new AppDatabase(dbPath);
+    }
+
     const { app } = createApp({ database: db });
     cachedApp = app;
   }

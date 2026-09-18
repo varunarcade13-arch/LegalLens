@@ -1,4 +1,4 @@
-import { Database as SqliteDb } from 'better-sqlite3';
+import { IDatabaseClient } from '../Database';
 import { LegalDocument, DocumentStatus } from '../../../core/domain/LegalDocument';
 import { IDocumentRepository } from '../../../core/ports';
 
@@ -19,74 +19,74 @@ interface DocumentRow {
 }
 
 export class SqliteDocumentRepository implements IDocumentRepository {
-  constructor(private db: SqliteDb) {}
+  constructor(private db: IDatabaseClient) {}
 
   public async create(doc: LegalDocument): Promise<void> {
-    const stmt = this.db.prepare(`
-      INSERT INTO documents (
+    await this.db.run(
+      `INSERT INTO documents (
         id, user_id, title, original_filename, mime_type, file_size_bytes,
         storage_path, page_count, character_count, status, error_message,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      doc.id,
-      doc.userId,
-      doc.title,
-      doc.originalFilename,
-      doc.mimeType,
-      doc.fileSizeBytes,
-      doc.storagePath,
-      doc.pageCount,
-      doc.characterCount,
-      doc.status,
-      doc.errorMessage,
-      doc.createdAt.toISOString(),
-      doc.updatedAt.toISOString()
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        doc.id,
+        doc.userId,
+        doc.title,
+        doc.originalFilename,
+        doc.mimeType,
+        doc.fileSizeBytes,
+        doc.storagePath,
+        doc.pageCount,
+        doc.characterCount,
+        doc.status,
+        doc.errorMessage,
+        doc.createdAt.toISOString(),
+        doc.updatedAt.toISOString(),
+      ]
     );
   }
 
   public async findById(id: string): Promise<LegalDocument | null> {
-    const stmt = this.db.prepare(`SELECT * FROM documents WHERE id = ?`);
-    const row = stmt.get(id) as DocumentRow | undefined;
+    const row = await this.db.get<DocumentRow>('SELECT * FROM documents WHERE id = ?', [id]);
     if (!row) return null;
     return this.mapToDomain(row);
   }
 
   public async findByUserId(userId: string): Promise<LegalDocument[]> {
-    const stmt = this.db.prepare(`
-      SELECT * FROM documents WHERE user_id = ? ORDER BY created_at DESC
-    `);
-    const rows = stmt.all(userId) as DocumentRow[];
+    const rows = await this.db.all<DocumentRow>(
+      'SELECT * FROM documents WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
     return rows.map((r) => this.mapToDomain(r));
   }
 
   public async update(doc: LegalDocument): Promise<void> {
-    const stmt = this.db.prepare(`
-      UPDATE documents
-      SET title = ?, status = ?, page_count = ?, character_count = ?,
-          error_message = ?, updated_at = ?
-      WHERE id = ?
-    `);
-    stmt.run(
-      doc.title,
-      doc.status,
-      doc.pageCount,
-      doc.characterCount,
-      doc.errorMessage,
-      doc.updatedAt.toISOString(),
-      doc.id
+    await this.db.run(
+      `UPDATE documents
+       SET title = ?, status = ?, page_count = ?, character_count = ?,
+           error_message = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        doc.title,
+        doc.status,
+        doc.pageCount,
+        doc.characterCount,
+        doc.errorMessage,
+        doc.updatedAt.toISOString(),
+        doc.id,
+      ]
     );
   }
 
   public async delete(id: string): Promise<void> {
-    const stmt = this.db.prepare(`DELETE FROM documents WHERE id = ?`);
-    stmt.run(id);
+    await this.db.run('DELETE FROM documents WHERE id = ?', [id]);
   }
 
   public async countByUserId(userId: string): Promise<number> {
-    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM documents WHERE user_id = ?`);
-    const res = stmt.get(userId) as { count: number };
+    const res = await this.db.get<{ count: number }>(
+      'SELECT COUNT(*) as count FROM documents WHERE user_id = ?',
+      [userId]
+    );
     return res ? res.count : 0;
   }
 

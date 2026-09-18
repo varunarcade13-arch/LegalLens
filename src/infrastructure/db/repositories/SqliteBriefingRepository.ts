@@ -1,5 +1,9 @@
-import { Database as SqliteDb } from 'better-sqlite3';
-import { LegalBriefing, LawyerChecklist, ActionChecklistItem } from '../../../core/domain/LegalBriefing';
+import { IDatabaseClient } from '../Database';
+import {
+  LegalBriefing,
+  LawyerChecklist,
+  ActionChecklistItem,
+} from '../../../core/domain/LegalBriefing';
 import { IBriefingRepository } from '../../../core/ports';
 
 interface BriefingRow {
@@ -15,11 +19,11 @@ interface BriefingRow {
 }
 
 export class SqliteBriefingRepository implements IBriefingRepository {
-  constructor(private db: SqliteDb) {}
+  constructor(private db: IDatabaseClient) {}
 
   public async save(briefing: LegalBriefing): Promise<void> {
-    const stmt = this.db.prepare(`
-      INSERT INTO legal_briefings (
+    await this.db.run(
+      `INSERT INTO legal_briefings (
         id, user_id, document_id, document_title, concise_summary,
         lawyer_checklist, action_checklist, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -28,45 +32,45 @@ export class SqliteBriefingRepository implements IBriefingRepository {
         concise_summary = excluded.concise_summary,
         lawyer_checklist = excluded.lawyer_checklist,
         action_checklist = excluded.action_checklist,
-        updated_at = excluded.updated_at
-    `);
-
-    stmt.run(
-      briefing.id,
-      briefing.userId,
-      briefing.documentId,
-      briefing.documentTitle,
-      briefing.conciseSummary,
-      JSON.stringify(briefing.lawyerChecklist),
-      JSON.stringify(briefing.actionChecklist),
-      briefing.createdAt.toISOString(),
-      briefing.updatedAt.toISOString()
+        updated_at = excluded.updated_at`,
+      [
+        briefing.id,
+        briefing.userId,
+        briefing.documentId,
+        briefing.documentTitle,
+        briefing.conciseSummary,
+        JSON.stringify(briefing.lawyerChecklist),
+        JSON.stringify(briefing.actionChecklist),
+        briefing.createdAt.toISOString(),
+        briefing.updatedAt.toISOString(),
+      ]
     );
   }
 
   public async findByDocumentId(documentId: string): Promise<LegalBriefing | null> {
-    const stmt = this.db.prepare(`SELECT * FROM legal_briefings WHERE document_id = ?`);
-    const row = stmt.get(documentId) as BriefingRow | undefined;
+    const row = await this.db.get<BriefingRow>(
+      'SELECT * FROM legal_briefings WHERE document_id = ?',
+      [documentId]
+    );
     if (!row) return null;
     return this.mapToDomain(row);
   }
 
   public async update(briefing: LegalBriefing): Promise<void> {
-    const stmt = this.db.prepare(`
-      UPDATE legal_briefings
-      SET action_checklist = ?, updated_at = ?
-      WHERE id = ?
-    `);
-    stmt.run(
-      JSON.stringify(briefing.actionChecklist),
-      briefing.updatedAt.toISOString(),
-      briefing.id
+    await this.db.run(
+      `UPDATE legal_briefings
+       SET action_checklist = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        JSON.stringify(briefing.actionChecklist),
+        briefing.updatedAt.toISOString(),
+        briefing.id,
+      ]
     );
   }
 
   public async delete(documentId: string): Promise<void> {
-    const stmt = this.db.prepare(`DELETE FROM legal_briefings WHERE document_id = ?`);
-    stmt.run(documentId);
+    await this.db.run('DELETE FROM legal_briefings WHERE document_id = ?', [documentId]);
   }
 
   private mapToDomain(row: BriefingRow): LegalBriefing {

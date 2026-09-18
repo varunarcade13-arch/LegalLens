@@ -980,12 +980,14 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       const store = new VectorStore(appDb.connection);
       const now = new Date().toISOString();
 
-      appDb.connection.prepare(
-        'INSERT INTO users (id, email, password_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run('u1', 'u1@example.com', 'hash', 'User 1', now, now);
-      appDb.connection.prepare(
-        'INSERT INTO documents (id, user_id, title, original_filename, mime_type, file_size_bytes, storage_path, page_count, character_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run('doc-dim-test', 'u1', 'Title', 'f.pdf', 'application/pdf', 100, '/data/f.pdf', 1, 100, 'ready', now, now);
+      await appDb.connection.run(
+        'INSERT INTO users (id, email, password_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        ['u1', 'u1@example.com', 'hash', 'User 1', now, now]
+      );
+      await appDb.connection.run(
+        'INSERT INTO documents (id, user_id, title, original_filename, mime_type, file_size_bytes, storage_path, page_count, character_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ['doc-dim-test', 'u1', 'Title', 'f.pdf', 'application/pdf', 100, '/data/f.pdf', 1, 100, 'ready', now, now]
+      );
 
       const chunk64 = new DocumentChunk({
         id: 'chunk-64',
@@ -1024,7 +1026,7 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       expect(res64?.score).toBe(0);
 
       // Verify that chunk-64 was set to NULL in DB
-      const row = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-64') as any;
+      const row = (await appDb.connection.get('SELECT embedding FROM document_chunks WHERE id = ?', ['chunk-64'])) as any;
       expect(row.embedding).toBeNull();
 
       appDb.close();
@@ -1035,12 +1037,14 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       const store = new VectorStore(appDb.connection);
       const now = new Date().toISOString();
 
-      appDb.connection.prepare(
-        'INSERT INTO users (id, email, password_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run('u2', 'u2@example.com', 'hash', 'User 2', now, now);
-      appDb.connection.prepare(
-        'INSERT INTO documents (id, user_id, title, original_filename, mime_type, file_size_bytes, storage_path, page_count, character_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run('doc-inv-test', 'u2', 'Title', 'f.pdf', 'application/pdf', 100, '/data/f.pdf', 1, 100, 'ready', now, now);
+      await appDb.connection.run(
+        'INSERT INTO users (id, email, password_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        ['u2', 'u2@example.com', 'hash', 'User 2', now, now]
+      );
+      await appDb.connection.run(
+        'INSERT INTO documents (id, user_id, title, original_filename, mime_type, file_size_bytes, storage_path, page_count, character_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ['doc-inv-test', 'u2', 'Title', 'f.pdf', 'application/pdf', 100, '/data/f.pdf', 1, 100, 'ready', now, now]
+      );
 
       const chunkOld = new DocumentChunk({
         id: 'chunk-old',
@@ -1067,21 +1071,22 @@ describe('Gemini Real AI & GenAI Coverage Suite', () => {
       await store.upsertChunks([chunkOld, chunkValid]);
 
       // Manually insert a malformed non-JSON embedding to verify catch block
-      appDb.connection.prepare(
-        'INSERT INTO document_chunks (id, document_id, chunk_index, page_number, section_heading, content, token_count, embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run('chunk-corrupt', 'doc-inv-test', 2, 1, 'H', 'corrupt', 1, '{not valid json}');
+      await appDb.connection.run(
+        'INSERT INTO document_chunks (id, document_id, chunk_index, page_number, section_heading, content, token_count, embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ['chunk-corrupt', 'doc-inv-test', 2, 1, 'H', 'corrupt', 1, '{not valid json}']
+      );
 
       // Invalidate everything not 3072
       const count = await store.invalidateIncompatibleEmbeddings(3072);
       expect(count).toBe(2); // chunk-old and chunk-corrupt
 
-      const validRow = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-valid') as any;
+      const validRow = (await appDb.connection.get('SELECT embedding FROM document_chunks WHERE id = ?', ['chunk-valid'])) as any;
       expect(JSON.parse(validRow.embedding)).toHaveLength(3072);
 
-      const oldRow = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-old') as any;
+      const oldRow = (await appDb.connection.get('SELECT embedding FROM document_chunks WHERE id = ?', ['chunk-old'])) as any;
       expect(oldRow.embedding).toBeNull();
 
-      const corruptRow = appDb.connection.prepare('SELECT embedding FROM document_chunks WHERE id = ?').get('chunk-corrupt') as any;
+      const corruptRow = (await appDb.connection.get('SELECT embedding FROM document_chunks WHERE id = ?', ['chunk-corrupt'])) as any;
       expect(corruptRow.embedding).toBeNull();
 
       appDb.close();

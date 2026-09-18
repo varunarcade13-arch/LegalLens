@@ -1,4 +1,4 @@
-import { Database as SqliteDb } from 'better-sqlite3';
+import { IDatabaseClient } from '../Database';
 import { Comparison, ClauseDifference } from '../../../core/domain/Comparison';
 import { IComparisonRepository } from '../../../core/ports';
 
@@ -23,58 +23,55 @@ interface ComparisonRow {
 }
 
 export class SqliteComparisonRepository implements IComparisonRepository {
-  constructor(private db: SqliteDb) {}
+  constructor(private db: IDatabaseClient) {}
 
   public async save(comparison: Comparison): Promise<void> {
-    const stmt = this.db.prepare(`
-      INSERT INTO comparisons (
+    await this.db.run(
+      `INSERT INTO comparisons (
         id, user_id, document_a_id, document_b_id, document_a_title,
         document_b_title, executive_summary, added_clauses, removed_clauses,
         modified_clauses, changed_obligations, changed_financial_terms,
         changed_dates, changed_termination, changed_liability,
         changed_dispute_resolution, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      comparison.id,
-      comparison.userId,
-      comparison.documentAId,
-      comparison.documentBId,
-      comparison.documentATitle,
-      comparison.documentBTitle,
-      comparison.executiveSummary,
-      JSON.stringify(comparison.addedClauses),
-      JSON.stringify(comparison.removedClauses),
-      JSON.stringify(comparison.modifiedClauses),
-      JSON.stringify(comparison.changedObligations),
-      JSON.stringify(comparison.changedFinancialTerms),
-      JSON.stringify(comparison.changedDates),
-      JSON.stringify(comparison.changedTermination),
-      JSON.stringify(comparison.changedLiability),
-      JSON.stringify(comparison.changedDisputeResolution),
-      comparison.createdAt.toISOString()
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        comparison.id,
+        comparison.userId,
+        comparison.documentAId,
+        comparison.documentBId,
+        comparison.documentATitle,
+        comparison.documentBTitle,
+        comparison.executiveSummary,
+        JSON.stringify(comparison.addedClauses),
+        JSON.stringify(comparison.removedClauses),
+        JSON.stringify(comparison.modifiedClauses),
+        JSON.stringify(comparison.changedObligations),
+        JSON.stringify(comparison.changedFinancialTerms),
+        JSON.stringify(comparison.changedDates),
+        JSON.stringify(comparison.changedTermination),
+        JSON.stringify(comparison.changedLiability),
+        JSON.stringify(comparison.changedDisputeResolution),
+        comparison.createdAt.toISOString(),
+      ]
     );
   }
 
   public async findById(id: string): Promise<Comparison | null> {
-    const stmt = this.db.prepare(`SELECT * FROM comparisons WHERE id = ?`);
-    const row = stmt.get(id) as ComparisonRow | undefined;
+    const row = await this.db.get<ComparisonRow>('SELECT * FROM comparisons WHERE id = ?', [id]);
     if (!row) return null;
     return this.mapToDomain(row);
   }
 
   public async findByUserId(userId: string): Promise<Comparison[]> {
-    const stmt = this.db.prepare(`
-      SELECT * FROM comparisons WHERE user_id = ? ORDER BY created_at DESC
-    `);
-    const rows = stmt.all(userId) as ComparisonRow[];
+    const rows = await this.db.all<ComparisonRow>(
+      'SELECT * FROM comparisons WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
     return rows.map((r) => this.mapToDomain(r));
   }
 
   public async delete(id: string): Promise<void> {
-    const stmt = this.db.prepare(`DELETE FROM comparisons WHERE id = ?`);
-    stmt.run(id);
+    await this.db.run('DELETE FROM comparisons WHERE id = ?', [id]);
   }
 
   private mapToDomain(row: ComparisonRow): Comparison {

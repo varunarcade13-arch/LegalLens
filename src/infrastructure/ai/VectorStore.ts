@@ -1,4 +1,4 @@
-import { Database as SqliteDb } from 'better-sqlite3';
+import { IDatabaseClient } from '../db/Database';
 import { DocumentChunk } from '../../core/domain/DocumentChunk';
 import { IVectorStore, VectorSearchResult } from '../../core/ports';
 
@@ -14,35 +14,30 @@ interface ChunkRow {
 }
 
 export class VectorStore implements IVectorStore {
-  constructor(private db: SqliteDb) {}
+  constructor(private db: IDatabaseClient) {}
 
   public async upsertChunks(chunks: DocumentChunk[]): Promise<void> {
-    const insertTransaction = this.db.transaction(() => {
-      const stmt = this.db.prepare(`
-        INSERT INTO document_chunks (
-          id, document_id, chunk_index, page_number, section_heading,
-          content, token_count, embedding
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          content = excluded.content,
-          embedding = excluded.embedding
-      `);
+    const statements = chunks.map((chunk) => ({
+      sql: `INSERT INTO document_chunks (
+        id, document_id, chunk_index, page_number, section_heading,
+        content, token_count, embedding
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        content = excluded.content,
+        embedding = excluded.embedding`,
+      args: [
+        chunk.id,
+        chunk.documentId,
+        chunk.chunkIndex,
+        chunk.pageNumber,
+        chunk.sectionHeading,
+        chunk.content,
+        chunk.tokenCount,
+        chunk.embedding ? JSON.stringify(chunk.embedding) : null,
+      ],
+    }));
 
-      for (const chunk of chunks) {
-        stmt.run(
-          chunk.id,
-          chunk.documentId,
-          chunk.chunkIndex,
-          chunk.pageNumber,
-          chunk.sectionHeading,
-          chunk.content,
-          chunk.tokenCount,
-          chunk.embedding ? JSON.stringify(chunk.embedding) : null
-        );
-      }
-    });
-
-    insertTransaction();
+    await this.db.batch(statements);
   }
 
   public async searchSimilar(
@@ -50,10 +45,10 @@ export class VectorStore implements IVectorStore {
     queryEmbedding: number[],
     topK: number = 4
   ): Promise<VectorSearchResult[]> {
-    const stmt = this.db.prepare(`
-      SELECT * FROM document_chunks WHERE document_id = ?
-    `);
-    const rows = stmt.all(documentId) as ChunkRow[];
+    const rows = await this.db.all<ChunkRow>(
+      'SELECT * FROM document_chunks WHERE document_id = ?',
+      [documentId]
+    );
     if (rows.length === 0) return [];
 
     const scored: VectorSearchResult[] = [];
@@ -65,7 +60,7 @@ export class VectorStore implements IVectorStore {
       if (row.embedding && queryEmbedding.length > 0) {
         const chunkEmbedding = JSON.parse(row.embedding) as number[];
         if (chunkEmbedding.length !== queryEmbedding.length) {
-          this.db.prepare('UPDATE document_chunks SET embedding = NULL WHERE id = ?').run(row.id);
+          await this.db.run('UPDATE document_chunks SET embedding = NULL WHERE id = ?', [row.id]);
           chunk.setEmbedding(null as any);
           score = 0;
         } else {
@@ -81,56 +76,53 @@ export class VectorStore implements IVectorStore {
   }
 
   public async invalidateIncompatibleEmbeddings(expectedDimension: number): Promise<number> {
-    const rows = this.db.prepare(
+    const rows = await this.db.all<{ id: string; embedding: string }>(
       'SELECT id, embedding FROM document_chunks WHERE embedding IS NOT NULL'
-    ).all() as { id: string; embedding: string }[];
+    );
 
-    let invalidatedCount = 0;
-    const updateStmt = this.db.prepare('UPDATE document_chunks SET embedding = NULL WHERE id = ?');
-
-    const runTransaction = this.db.transaction(() => {
-      for (const row of rows) {
-        try {
-          const parsed = JSON.parse(row.embedding);
-          if (!Array.isArray(parsed) || parsed.length !== expectedDimension) {
-            updateStmt.run(row.id);
-            invalidatedCount++;
-          }
-        } catch {
-          updateStmt.run(row.id);
-          invalidatedCount++;
+    const invalidIds: string[] = [];
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.embedding);
+        if (!Array.isArray(parsed) || parsed.length !== expectedDimension) {
+          invalidIds.push(row.id);
         }
+      } catch {
+        invalidIds.push(row.id);
       }
-    });
+    }
 
-    runTransaction();
-    return invalidatedCount;
+    if (invalidIds.length > 0) {
+      const statements = invalidIds.map((id) => ({
+        sql: 'UPDATE document_chunks SET embedding = NULL WHERE id = ?',
+        args: [id],
+      }));
+      await this.db.batch(statements);
+    }
+
+    return invalidIds.length;
   }
 
   public async searchKeyword(documentId: string, query: string): Promise<DocumentChunk[]> {
-    let stmt;
     let rows: ChunkRow[];
 
     if (!query || query.trim().length === 0) {
-      stmt = this.db.prepare(`
-        SELECT * FROM document_chunks WHERE document_id = ? ORDER BY chunk_index ASC
-      `);
-      rows = stmt.all(documentId) as ChunkRow[];
+      rows = await this.db.all<ChunkRow>(
+        'SELECT * FROM document_chunks WHERE document_id = ? ORDER BY chunk_index ASC',
+        [documentId]
+      );
     } else {
-      stmt = this.db.prepare(`
-        SELECT * FROM document_chunks
-        WHERE document_id = ? AND content LIKE ?
-        ORDER BY chunk_index ASC
-      `);
-      rows = stmt.all(documentId, `%${query.trim()}%`) as ChunkRow[];
+      rows = await this.db.all<ChunkRow>(
+        'SELECT * FROM document_chunks WHERE document_id = ? AND content LIKE ? ORDER BY chunk_index ASC',
+        [documentId, `%${query.trim()}%`]
+      );
     }
 
     return rows.map((r) => this.mapToDomain(r));
   }
 
   public async deleteByDocumentId(documentId: string): Promise<void> {
-    const stmt = this.db.prepare(`DELETE FROM document_chunks WHERE document_id = ?`);
-    stmt.run(documentId);
+    await this.db.run('DELETE FROM document_chunks WHERE document_id = ?', [documentId]);
   }
 
   private cosineSimilarity(vecA: number[], vecB: number[]): number {

@@ -1,53 +1,181 @@
-import Database from 'better-sqlite3';
+import { createClient, Client, InStatement } from '@libsql/client';
 import path from 'path';
 import fs from 'fs';
 
-export class AppDatabase {
-  private db: Database.Database;
+export interface IPreparedStatement {
+  run(...args: any[]): Promise<{ rowsAffected: number }>;
+  get<T = any>(...args: any[]): Promise<T | null>;
+  all<T = any>(...args: any[]): Promise<T[]>;
+}
 
-  constructor(dbPath: string = ':memory:') {
-    try {
-      if (dbPath !== ':memory:') {
-        const dir = path.dirname(dbPath);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
+export interface IDatabaseClient {
+  execute(statement: string | InStatement): Promise<{ rowsAffected: number; rows: any[] }>;
+  get<T = any>(sql: string, args?: any[]): Promise<T | null>;
+  all<T = any>(sql: string, args?: any[]): Promise<T[]>;
+  run(sql: string, args?: any[]): Promise<{ rowsAffected: number }>;
+  batch(statements: (string | InStatement)[]): Promise<void>;
+  exec(sqlScript: string): Promise<void>;
+  prepare(sql: string): IPreparedStatement;
+  close(): Promise<void> | void;
+}
+
+export interface AppDatabaseOptions {
+  url?: string;
+  authToken?: string;
+  dbPath?: string;
+}
+
+function sanitizeArg(val: any): any {
+  if (val === undefined) return null;
+  return val;
+}
+
+function sanitizeArgs(args?: any): any {
+  if (!args) return [];
+  if (Array.isArray(args)) {
+    return args.map(sanitizeArg);
+  }
+  const sanitizedObj: Record<string, any> = {};
+  for (const [k, v] of Object.entries(args)) {
+    sanitizedObj[k] = sanitizeArg(v);
+  }
+  return sanitizedObj;
+}
+
+export class AppDatabase implements IDatabaseClient {
+  private client: Client;
+  private isInitialized: boolean = false;
+  private initPromise: Promise<void> | null = null;
+
+  constructor(optionsOrPath?: string | AppDatabaseOptions) {
+    let url: string;
+    let authToken: string | undefined;
+
+    if (typeof optionsOrPath === 'string') {
+      if (optionsOrPath === ':memory:' || optionsOrPath === '') {
+        url = 'file::memory:';
+      } else if (
+        optionsOrPath.startsWith('libsql://') ||
+        optionsOrPath.startsWith('https://') ||
+        optionsOrPath.startsWith('http://')
+      ) {
+        url = optionsOrPath;
+      } else {
+        url = optionsOrPath.startsWith('file:') ? optionsOrPath : `file:${optionsOrPath}`;
       }
-      this.db = new Database(dbPath);
-    } catch {
-      this.db = new Database(':memory:');
+    } else {
+      url =
+        optionsOrPath?.url ||
+        process.env.TURSO_DATABASE_URL ||
+        (optionsOrPath?.dbPath
+          ? optionsOrPath.dbPath.startsWith('file:')
+            ? optionsOrPath.dbPath
+            : `file:${optionsOrPath.dbPath}`
+          : 'file::memory:');
+      authToken = optionsOrPath?.authToken || process.env.TURSO_AUTH_TOKEN;
     }
-    this.initPragmas();
-    this.initSchema();
-  }
 
-  public get connection(): Database.Database {
-    return this.db;
-  }
-
-  public close(): void {
-    this.db.close();
-  }
-
-  private initPragmas(): void {
-    try {
-      this.db.pragma('foreign_keys = ON');
-    } catch {
-      // ignore
+    if (url.startsWith('libsql://') && !authToken) {
+      throw new Error('TURSO_AUTH_TOKEN is required when using a remote Turso database URL.');
     }
-    try {
-      this.db.pragma('journal_mode = WAL');
-    } catch {
-      try {
-        this.db.pragma('journal_mode = MEMORY');
-      } catch {
-        // ignore
+
+    if (url.startsWith('file:') && url !== 'file::memory:') {
+      const filePath = url.replace(/^file:/, '');
+      const dir = path.dirname(filePath);
+      if (dir && !fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
       }
     }
+
+    this.client = createClient({
+      url,
+      authToken,
+    });
   }
 
-  private initSchema(): void {
-    this.db.exec(`
+  public get connection(): IDatabaseClient {
+    return this;
+  }
+
+  public async ensureInitialized(): Promise<void> {
+    if (this.isInitialized) return;
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        await this.initPragmas();
+        await this.initSchema();
+        this.isInitialized = true;
+      })();
+    }
+    await this.initPromise;
+  }
+
+  public async execute(statement: string | InStatement): Promise<{ rowsAffected: number; rows: any[] }> {
+    await this.ensureInitialized();
+    let sanitizedStatement: InStatement;
+    if (typeof statement === 'string') {
+      sanitizedStatement = { sql: statement, args: [] };
+    } else {
+      sanitizedStatement = { sql: statement.sql, args: sanitizeArgs(statement.args) };
+    }
+    const res = await this.client.execute(sanitizedStatement);
+    return {
+      rowsAffected: res.rowsAffected,
+      rows: res.rows as any[],
+    };
+  }
+
+  public async get<T = any>(sql: string, args?: any[]): Promise<T | null> {
+    await this.ensureInitialized();
+    const res = await this.client.execute({ sql, args: sanitizeArgs(args) });
+    if (res.rows.length === 0) return null;
+    return res.rows[0] as unknown as T;
+  }
+
+  public async all<T = any>(sql: string, args?: any[]): Promise<T[]> {
+    await this.ensureInitialized();
+    const res = await this.client.execute({ sql, args: sanitizeArgs(args) });
+    return res.rows as unknown as T[];
+  }
+
+  public async run(sql: string, args?: any[]): Promise<{ rowsAffected: number }> {
+    await this.ensureInitialized();
+    const res = await this.client.execute({ sql, args: sanitizeArgs(args) });
+    return { rowsAffected: res.rowsAffected };
+  }
+
+  public async batch(statements: (string | InStatement)[]): Promise<void> {
+    await this.ensureInitialized();
+    if (!statements || statements.length === 0) return;
+    const sanitized = statements.map((s) =>
+      typeof s === 'string'
+        ? ({ sql: s, args: [] } as InStatement)
+        : ({ sql: s.sql, args: sanitizeArgs(s.args) } as InStatement)
+    );
+    await this.client.batch(sanitized, 'write');
+  }
+
+  public async exec(sqlScript: string): Promise<void> {
+    await this.client.executeMultiple(sqlScript);
+  }
+
+  public prepare(sql: string): IPreparedStatement {
+    return {
+      run: async (...args: any[]) => this.run(sql, args),
+      get: async <T = any>(...args: any[]) => this.get<T>(sql, args),
+      all: async <T = any>(...args: any[]) => this.all<T>(sql, args),
+    };
+  }
+
+  public async close(): Promise<void> {
+    this.client.close();
+  }
+
+  private async initPragmas(): Promise<void> {
+    await this.client.execute('PRAGMA foreign_keys = ON;');
+  }
+
+  private async initSchema(): Promise<void> {
+    await this.client.executeMultiple(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,

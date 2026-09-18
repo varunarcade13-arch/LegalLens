@@ -1,4 +1,4 @@
-import { Database as SqliteDb } from 'better-sqlite3';
+import { IDatabaseClient } from '../Database';
 import { User } from '../../../core/domain/User';
 import { IUserRepository } from '../../../core/ports';
 
@@ -12,47 +12,47 @@ interface UserRow {
 }
 
 export class SqliteUserRepository implements IUserRepository {
-  constructor(private db: SqliteDb) {}
+  constructor(private db: IDatabaseClient) {}
 
   public async create(user: User): Promise<void> {
-    const stmt = this.db.prepare(`
-      INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      user.id,
-      user.email,
-      user.passwordHash,
-      user.name,
-      user.createdAt.toISOString(),
-      user.updatedAt.toISOString()
+    await this.db.run(
+      `INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        user.id,
+        user.email,
+        user.passwordHash,
+        user.name,
+        user.createdAt.toISOString(),
+        user.updatedAt.toISOString(),
+      ]
     );
   }
 
   public async findById(id: string): Promise<User | null> {
-    const stmt = this.db.prepare(`SELECT * FROM users WHERE id = ?`);
-    const row = stmt.get(id) as UserRow | undefined;
+    const row = await this.db.get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
     if (!row) return null;
     return this.mapToDomain(row);
   }
 
   public async findByEmail(email: string): Promise<User | null> {
-    const stmt = this.db.prepare(`SELECT * FROM users WHERE email = ?`);
-    const row = stmt.get(email.toLowerCase().trim()) as UserRow | undefined;
+    const row = await this.db.get<UserRow>('SELECT * FROM users WHERE email = ?', [
+      email.toLowerCase().trim(),
+    ]);
     if (!row) return null;
     return this.mapToDomain(row);
   }
 
   public async update(user: User): Promise<void> {
-    const stmt = this.db.prepare(`
-      UPDATE users SET name = ?, updated_at = ? WHERE id = ?
-    `);
-    stmt.run(user.name, user.updatedAt.toISOString(), user.id);
+    await this.db.run('UPDATE users SET name = ?, updated_at = ? WHERE id = ?', [
+      user.name,
+      user.updatedAt.toISOString(),
+      user.id,
+    ]);
   }
 
   public async delete(id: string): Promise<void> {
-    const stmt = this.db.prepare(`DELETE FROM users WHERE id = ?`);
-    stmt.run(id);
+    await this.db.run('DELETE FROM users WHERE id = ?', [id]);
   }
 
   private mapToDomain(row: UserRow): User {

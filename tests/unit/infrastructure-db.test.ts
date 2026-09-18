@@ -55,6 +55,91 @@ describe('Infrastructure Database & Repositories', () => {
     diskDb.close();
   });
 
+  describe('AppDatabase direct methods & branches', () => {
+    it('throws error when libsql remote url is provided without auth token', () => {
+      expect(() => new AppDatabase('libsql://test.turso.io')).toThrow(
+        'TURSO_AUTH_TOKEN is required when using a remote Turso database URL.'
+      );
+    });
+
+    it('instantiates with options object and remote url when token provided', () => {
+      const db = new AppDatabase({ url: 'libsql://test.turso.io', authToken: 'token123' });
+      expect(db).toBeDefined();
+    });
+
+    it('instantiates with options object dbPath', () => {
+      const db = new AppDatabase({ dbPath: testFileDbPath });
+      expect(db).toBeDefined();
+      db.close();
+
+      const db2 = new AppDatabase({ dbPath: `file:${testFileDbPath}` });
+      expect(db2).toBeDefined();
+      db2.close();
+
+      const db3 = new AppDatabase(`file:${testFileDbPath}`);
+      expect(db3).toBeDefined();
+      db3.close();
+
+      const db4 = new AppDatabase('https://example.com');
+      expect(db4).toBeDefined();
+      db4.close();
+    });
+
+    it('instantiates with empty string or default', () => {
+      const db1 = new AppDatabase('');
+      expect(db1).toBeDefined();
+      db1.close();
+
+      const db2 = new AppDatabase({});
+      expect(db2).toBeDefined();
+      db2.close();
+    });
+
+    it('executes direct SQL queries and statements', async () => {
+      const db = new AppDatabase(':memory:');
+      await db.exec('CREATE TABLE test_table (id TEXT PRIMARY KEY, value TEXT);');
+      
+      const runRes = await db.run('INSERT INTO test_table (id, value) VALUES (?, ?)', ['1', 'val1']);
+      expect(runRes.rowsAffected).toBe(1);
+
+      const getRes = await db.get<{ id: string; value: string }>('SELECT * FROM test_table WHERE id = ?', ['1']);
+      expect(getRes?.value).toBe('val1');
+
+      const allRes = await db.all<{ id: string; value: string }>('SELECT * FROM test_table');
+      expect(allRes).toHaveLength(1);
+
+      const execRes = await db.execute({ sql: 'SELECT * FROM test_table WHERE id = ?', args: ['1'] });
+      expect(execRes.rows).toHaveLength(1);
+
+      const execResStr = await db.execute('SELECT * FROM test_table');
+      expect(execResStr.rows).toHaveLength(1);
+
+      const execResNamed = await db.execute({ sql: 'SELECT * FROM test_table WHERE id = :id', args: { id: '1', extra: undefined } as any });
+      expect(execResNamed.rows).toHaveLength(1);
+
+      // batch
+      await db.batch([]);
+      await db.batch([
+        'INSERT INTO test_table (id, value) VALUES (\'2\', \'val2\')',
+        { sql: 'INSERT INTO test_table (id, value) VALUES (?, ?)', args: ['3', 'val3'] }
+      ]);
+      const count = await db.all('SELECT * FROM test_table');
+      expect(count).toHaveLength(3);
+
+      // prepare
+      const stmt = db.prepare('SELECT * FROM test_table WHERE id = ?');
+      const prepGet = await stmt.get<{ id: string }>('2');
+      expect(prepGet?.id).toBe('2');
+      const prepAll = await stmt.all('2');
+      expect(prepAll).toHaveLength(1);
+      const prepRunStmt = db.prepare('DELETE FROM test_table WHERE id = ?');
+      const prepRun = await prepRunStmt.run('2');
+      expect(prepRun.rowsAffected).toBe(1);
+
+      await db.close();
+    });
+  });
+
   describe('SqliteUserRepository', () => {
     it('creates, finds by id and email, updates, and deletes users', async () => {
       const now = new Date();

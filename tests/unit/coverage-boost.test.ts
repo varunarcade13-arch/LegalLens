@@ -1189,9 +1189,7 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
 
     it('covers SqliteDocumentRepository countByUserId when stmt.get returns undefined', async () => {
       const mockDb = {
-        prepare: () => ({
-          get: () => undefined,
-        }),
+        get: vi.fn().mockResolvedValue(null),
       } as any;
       const repo = new SqliteDocumentRepository(mockDb);
       const count = await repo.countByUserId('non-existent');
