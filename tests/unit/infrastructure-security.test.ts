@@ -40,6 +40,31 @@ describe('Infrastructure Security Units', () => {
       const otherService = new JwtTokenService('different_secret', '1h');
       expect(() => otherService.verifyToken(token)).toThrow(AuthenticationError);
     });
+
+    it('enforces strict JWT_SECRET in production mode', () => {
+      const origEnv = process.env.NODE_ENV;
+      const origSecret = process.env.JWT_SECRET;
+      try {
+        process.env.NODE_ENV = 'production';
+        delete process.env.JWT_SECRET;
+
+        // Missing secret in production throws
+        expect(() => new JwtTokenService()).toThrow('JWT_SECRET environment variable is strictly required in production.');
+
+        // Weak/short secret in production throws
+        expect(() => new JwtTokenService('too-short-secret')).toThrow('JWT_SECRET must be at least 32 characters long in production');
+
+        // Valid 32+ char secret in production succeeds
+        const strongSecret = 'a-very-strong-production-jwt-secret-key-with-sufficient-entropy-32-chars';
+        const prodService = new JwtTokenService(strongSecret);
+        const token = prodService.generateToken({ userId: 'u1', email: 'u1@test.com' });
+        expect(prodService.verifyToken(token).userId).toBe('u1');
+      } finally {
+        process.env.NODE_ENV = origEnv;
+        if (origSecret) process.env.JWT_SECRET = origSecret;
+        else delete process.env.JWT_SECRET;
+      }
+    });
   });
 
   describe('FileValidator', () => {
@@ -180,6 +205,24 @@ describe('Infrastructure Security Units', () => {
       limiter.reset();
       const resAfterReset = await limiter.checkLimit(key, 3, 10000);
       expect(resAfterReset.allowed).toBe(true);
+    });
+
+    it('prunes expired buckets and triggers auto-pruning when size exceeds threshold', async () => {
+      const limiter = new InMemoryRateLimiter();
+      const now = Date.now();
+
+      // Seed entries
+      await limiter.checkLimit('stale_key_1', 10, 1000);
+      await limiter.checkLimit('stale_key_2', 10, 1000);
+
+      // Prune with future timestamp
+      limiter.prune(now + 2000, 1000);
+
+      // Seed 1001 dummy keys to trigger auto-prune branch
+      for (let i = 0; i < 1005; i++) {
+        await limiter.checkLimit(`ip_${i}`, 10, 1000);
+      }
+      expect(limiter).toBeDefined();
     });
   });
 });

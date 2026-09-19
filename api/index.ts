@@ -42,7 +42,10 @@ export default function handler(req: any, res: any) {
     console.error('Serverless Handler Error:', err);
     res.status(500).json({
       error: 'Internal Server Error',
-      message: err?.message || String(err),
+      message:
+        process.env.NODE_ENV === 'production'
+          ? 'An unexpected server error occurred. Please try again later.'
+          : err?.message || String(err),
     });
   }
 }

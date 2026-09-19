@@ -28,6 +28,10 @@ export class InMemoryRateLimiter implements IRateLimiter {
     const windowStart = now - windowMs;
     entry.timestamps = entry.timestamps.filter((ts) => ts > windowStart);
 
+    if (this.buckets.size > 1000) {
+      this.prune(now, windowMs);
+    }
+
     if (entry.timestamps.length >= maxRequests) {
       const oldest = entry.timestamps[0];
       const resetTime = Math.ceil((oldest + windowMs - now) / 1000);
@@ -44,6 +48,16 @@ export class InMemoryRateLimiter implements IRateLimiter {
       remaining: maxRequests - entry.timestamps.length,
       resetTime: Math.ceil(windowMs / 1000),
     };
+  }
+
+  public prune(now: number = Date.now(), windowMs: number = 60 * 1000): void {
+    const windowStart = now - windowMs;
+    for (const [k, v] of this.buckets.entries()) {
+      v.timestamps = v.timestamps.filter((ts) => ts > windowStart);
+      if (v.timestamps.length === 0) {
+        this.buckets.delete(k);
+      }
+    }
   }
 
   public reset(): void {

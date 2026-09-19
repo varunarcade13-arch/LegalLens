@@ -126,16 +126,19 @@ export class VectorStore implements IVectorStore {
   }
 
   private cosineSimilarity(vecA: number[], vecB: number[]): number {
-    if (vecA.length !== vecB.length || vecA.length === 0) return 0;
+    const len = vecA.length;
+    if (len !== vecB.length || len === 0) return 0;
 
     let dot = 0;
     let normA = 0;
     let normB = 0;
 
-    for (let i = 0; i < vecA.length; i++) {
-      dot += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
+    for (let i = 0; i < len; i++) {
+      const a = vecA[i];
+      const b = vecB[i];
+      dot += a * b;
+      normA += a * a;
+      normB += b * b;
     }
 
     if (normA === 0 || normB === 0) return 0;
