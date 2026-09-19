@@ -644,7 +644,7 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
       database.close();
     });
 
-    it('covers authMiddleware token verification error path', () => {
+    it('covers authMiddleware token verification error path', async () => {
       const mockTokenService = {
         generateToken: vi.fn(),
         verifyToken: vi.fn().mockImplementation(() => {
@@ -656,8 +656,38 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
       const res: any = {};
       const next = vi.fn();
 
-      middleware(req, res, next);
+      await middleware(req, res, next);
       expect(next).toHaveBeenCalledWith(expect.any(AuthenticationError));
+    });
+
+    it('covers authMiddleware with userRepository when user does not exist or exists', async () => {
+      const mockTokenService = {
+        verifyToken: vi.fn().mockReturnValue({ userId: 'u-missing', email: 'missing@test.com' }),
+        generateToken: vi.fn(),
+      };
+      const mockUserRepo = {
+        findById: vi.fn().mockResolvedValue(null),
+      };
+      const middleware = createAuthMiddleware(mockTokenService as any, mockUserRepo as any);
+      const req: any = { headers: { authorization: 'Bearer valid-jwt-token' } };
+      const next = vi.fn();
+
+      await middleware(req, {} as any, next);
+      expect(next).toHaveBeenCalledWith(expect.any(AuthenticationError));
+      expect(next.mock.calls[0][0].message).toContain('User not found');
+
+      // User exists
+      mockUserRepo.findById.mockResolvedValueOnce({ id: 'u-exists', email: 'exists@test.com' });
+      const nextSuccess = vi.fn();
+      await middleware(req, {} as any, nextSuccess);
+      expect(nextSuccess).toHaveBeenCalledWith();
+      expect(req.userId).toBe('u-missing');
+
+      // Repo throws
+      mockUserRepo.findById.mockRejectedValueOnce(new Error('DB error'));
+      const nextError = vi.fn();
+      await middleware(req, {} as any, nextError);
+      expect(nextError).toHaveBeenCalledWith(expect.any(Error));
     });
 
     it('covers errorHandlerMiddleware for non-validation DomainError and ZodError empty path', () => {
@@ -1069,13 +1099,13 @@ describe('Unit Coverage Boost - Comprehensive Edge Cases', () => {
       expect(res.error).toContain('Unsupported file format');
     });
 
-    it('covers authMiddleware when header does not start with Bearer', () => {
+    it('covers authMiddleware when header does not start with Bearer', async () => {
       const middleware = createAuthMiddleware({
         generateToken: vi.fn(),
         verifyToken: vi.fn(),
       });
       const next = vi.fn();
-      middleware({ headers: { authorization: 'Basic credentials123' } } as any, {} as any, next);
+      await middleware({ headers: { authorization: 'Basic credentials123' } } as any, {} as any, next);
       expect(next).toHaveBeenCalledWith(expect.any(AuthenticationError));
     });
 

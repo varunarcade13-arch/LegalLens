@@ -179,7 +179,7 @@ export function createApp(options?: AppOptions): { app: Express; database: AppDa
   const healthController = new HealthController();
 
   // Middleware
-  const authMiddleware = createAuthMiddleware(tokenService);
+  const authMiddleware = createAuthMiddleware(tokenService, userRepo);
   const rateLimitMiddleware = createRateLimitMiddleware(
     rateLimiter,
     options?.maxRequestsPerMinute ?? 300,

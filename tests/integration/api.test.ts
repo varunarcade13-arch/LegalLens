@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from '../../src/presentation/app';
 import { AppDatabase } from '../../src/infrastructure/db/Database';
 import { InMemoryRateLimiter } from '../../src/infrastructure/security/RateLimiter';
+import { JwtTokenService } from '../../src/infrastructure/security/JwtTokenService';
 
 describe('API Integration Tests', () => {
   let app: any;
@@ -127,11 +128,12 @@ describe('API Integration Tests', () => {
       expect(res.status).toBe(200);
       expect(res.body.message).toContain('deleted');
 
-      // Subsequent profile check returns 404 (user deleted)
+      // Subsequent profile check returns 401 (user deleted from database)
       const resCheck = await request(app)
         .get('/api/auth/profile')
         .set('Authorization', `Bearer ${authToken}`);
-      expect(resCheck.status).toBe(404);
+      expect(resCheck.status).toBe(401);
+      expect(resCheck.body.error.message).toContain('User not found or session expired');
     });
   });
 
@@ -219,6 +221,19 @@ describe('API Integration Tests', () => {
         .set('Authorization', `Bearer ${authToken}`);
       expect(res.status).toBe(400);
       expect(res.body.error.message).toContain('file is required');
+    });
+
+    it('POST /api/documents returns 401 when request uses stale JWT with non-existent user', async () => {
+      const tokenService = new JwtTokenService('test-integration-secret-key-12345');
+      const staleToken = tokenService.generateToken({ userId: 'stale-user-id-not-in-db', email: 'stale@example.com' });
+      const fileContent = Buffer.from('Contract text');
+      const res = await request(app)
+        .post('/api/documents')
+        .set('Authorization', `Bearer ${staleToken}`)
+        .attach('file', fileContent, 'test.txt');
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.message).toContain('User not found or session expired');
     });
 
     it('GET /api/documents lists user documents', async () => {
